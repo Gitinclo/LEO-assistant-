@@ -1,0 +1,8 @@
+{
+  "name": "LEO AI",
+  "description": "A calm, thoughtful AI chat companion with a warm organic aesthetic and multi-turn conversation history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

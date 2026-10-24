@@ -1,11 +1,19 @@
-<div align="center">
+# LEO AI
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+LEO AI is a calm, thoughtful AI chat companion built with React, TypeScript, and Vite.
 
-  <h1>Built with AI Studio</h2>
+## Features
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- **Welcome Screen (`/`)**: Time-of-day greeting, 5 starter prompt chips, and bottom message input that creates a new conversation session.
+- **Chat Screen (`/chat/:sessionId`)**: Multi-turn conversation interface with optimistic user message rendering, animated typing indicator, persistent session messages, and server-side `/api/sessions/:id/chat` integration.
+- **History Screen (`/history`)**: Conversation list grouped by `TODAY`, `YESTERDAY`, and `EARLIER`, with one-tap resume and delete actions.
+- **Settings Screen (`/settings`)**: Brand overview, about card, and "Clear all conversations" action.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Development
 
-</div>
+```bash
+npm install
+npm run dev
+```
+
+Runs on `http://0.0.0.0:3000`.
