@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LEO AI</string>
+    <string name="brand_name">LEO</string>
+    <string name="welcome_eyebrow">LEO · A QUIETER AI</string>
+    <string name="welcome_subheading">How can I help you think today?</string>
+    <string name="section_try_starter">TRY A STARTER</string>
+    <string name="placeholder_ask_leo">Ask LEO anything…</string>
+    <string name="placeholder_message_leo">Message LEO…</string>
+    <string name="chat_status_thinking">thinking…</string>
+    <string name="chat_status_ready">here when you need</string>
+    <string name="chat_empty_prompt">Say anything. I\'ll meet you where you are.</string>
+    <string name="history_title">Conversations</string>
+    <string name="history_empty_title">No conversations yet</string>
+    <string name="history_empty_hint">Start a new chat and your history will gather here.</string>
+    <string name="history_empty_cta">Start a conversation</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_brand_tag">A quieter kind of AI</string>
+    <string name="settings_section_about">ABOUT</string>
+    <string name="settings_about_body">LEO is a calm, thoughtful AI companion built to help you think out loud. Powered by Claude Sonnet 4.5.</string>
+    <string name="settings_section_data">DATA</string>
+    <string name="settings_clear_conversations">Clear all conversations</string>
+    <string name="settings_cleared">Cleared.</string>
+    <string name="settings_footer">v1.0 · Built with care</string>
+    <string name="cd_open_history">Open conversation history</string>
+    <string name="cd_open_settings">Open settings</string>
+    <string name="cd_send_message">Send message</string>
+    <string name="cd_back">Navigate back</string>
+    <string name="cd_new_chat">Start new conversation</string>
+    <string name="cd_delete_session">Delete conversation</string>
+    <string name="cd_leo_avatar">LEO avatar</string>
+</resources>
