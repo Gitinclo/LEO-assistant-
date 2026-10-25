@@ -4,11 +4,13 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
-import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Data Access Object for chat session metadata stored in the local Room database.
+ * Message-level operations are handled by [com.leoai.app.data.ChatMessageDao].
+ */
 @Dao
 interface ChatDao {
 
@@ -26,31 +28,4 @@ interface ChatDao {
 
     @Query("DELETE FROM chat_sessions")
     suspend fun clearAllSessions()
-
-    @Query("SELECT * FROM chat_messages WHERE session_id = :sessionId ORDER BY created_at ASC")
-    fun getMessagesForSession(sessionId: String): Flow<List<ChatMessageEntity>>
-
-    @Query("SELECT * FROM chat_messages WHERE session_id = :sessionId ORDER BY created_at ASC")
-    suspend fun getMessagesForSessionSnapshot(sessionId: String): List<ChatMessageEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessage(message: ChatMessageEntity)
-
-    @Query("DELETE FROM chat_messages WHERE session_id = :sessionId")
-    suspend fun deleteMessagesForSession(sessionId: String)
-
-    @Query("DELETE FROM chat_messages")
-    suspend fun clearAllMessages()
-
-    @Transaction
-    suspend fun deleteSessionWithMessages(sessionId: String) {
-        deleteMessagesForSession(sessionId)
-        deleteSessionById(sessionId)
-    }
-
-    @Transaction
-    suspend fun clearAll() {
-        clearAllMessages()
-        clearAllSessions()
-    }
 }

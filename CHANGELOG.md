@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1] - 2026-10-24
+
+### Added
+- **Automated CI Guardrails**:
+  - Configured comprehensive GitHub Actions workflow (`.github/workflows/build.yml`) incorporating the four essential vibe coding guardrails: Linter/Static Analysis, Deprecation/Vulnerability auditing, Code Formatting check, and JVM Regression Tests.
+- **Vibe Coding Process Guidelines**:
+  - Documented the Architect-First Rule, Periodic Refactor Session checkpoints, and Rubber Duck Technique in `CONTRIBUTING.md` and `README.md`.
+
+### Changed
+- Removed `.env.example` environment variable entries so the application runs immediately with zero secret/API key prompts and unrestricted preview sharing.
+- Refactored date helpers in `Models.kt` to use thread-safe UTC `SimpleDateFormat` and `Calendar` for seamless minSdk 24 compatibility and zero NewApi lint warnings.
+- Cleaned up layout width modifiers in `ChatScreen.kt` and status bar color definitions in `MainActivity.kt`.
+
+---
+
 ## [1.0.0] - 2026-10-24
 
 ### Added

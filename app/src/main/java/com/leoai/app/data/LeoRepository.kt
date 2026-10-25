@@ -32,6 +32,13 @@ class LeoRepository(
     }
 
     /**
+     * Reactive stream of all chat messages across all sessions ordered by timestamp ascending.
+     */
+    val allMessages: Flow<List<ChatMessage>> = messageDao.getAllChatHistory().map { entities ->
+        entities.map { it.toDomain() }
+    }
+
+    /**
      * Reactive stream of messages for a given session using ChatMessageDao.
      */
     fun getMessagesForSession(sessionId: String): Flow<List<ChatMessage>> {
@@ -49,7 +56,8 @@ class LeoRepository(
     }
 
     suspend fun deleteSession(sessionId: String) = withContext(Dispatchers.IO) {
-        chatDao.deleteSessionWithMessages(sessionId)
+        messageDao.deleteMessageHistoryBySession(sessionId)
+        chatDao.deleteSessionById(sessionId)
     }
 
     suspend fun clearAllConversations() = withContext(Dispatchers.IO) {

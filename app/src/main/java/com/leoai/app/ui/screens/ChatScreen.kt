@@ -44,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -302,8 +301,6 @@ fun ChatScreen(
 @Composable
 private fun ChatMessageRow(message: ChatMessage) {
     val isUser = message.role == "user"
-    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val maxBubbleWidth = (screenWidth * 0.82f).coerceAtMost(520.dp)
 
     val bubbleShape = if (isUser) {
         RoundedCornerShape(
@@ -337,7 +334,8 @@ private fun ChatMessageRow(message: ChatMessage) {
 
         Box(
             modifier = Modifier
-                .widthIn(max = maxBubbleWidth)
+                .widthIn(max = 520.dp)
+                .fillMaxWidth(if (isUser) 0.85f else 0.82f)
                 .clip(bubbleShape)
                 .background(if (isUser) LeoColors.Primary else LeoColors.Surface)
                 .then(

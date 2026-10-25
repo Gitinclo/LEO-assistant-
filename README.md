@@ -65,12 +65,25 @@ Output APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 This project was built adopting the modern **"Vibe Coding"** methodology:
 - **Director-Led Architecture**: The product vision, calm tactile UI design system, UX flows, and feature specifications were guided by human prompting and creative direction.
 - **AI-Assisted Implementation**: The Kotlin/Compose codebase, Room persistence layer, and tests were synthesized using Google AI Studio.
-- **Safeguarding Against Spaghetti Code**:
-  - Modular clean MVVM architecture with strict layer isolation (`data`, `domain`, `ui`, `theme`).
-  - Automated JVM unit tests (`LeoAppUnitTest.kt`) verifying critical business logic (date groupings, time-of-day greetings, entity-domain mapping, and response engine).
-  - CI pipeline (`.github/workflows/build.yml`) that runs `gradle testDebugUnitTest` before building APKs to catch regressions instantly.
+
+### Eliminating the "Spaghetti Code" Risk: Two-Part Guardrails
+
+AI can rapidly generate code, but without structure it can produce inconsistent architecture or duplicate logic. LEO AI enforces a dual-defense system:
+
+#### 1. Automated CI Guardrails (`.github/workflows/build.yml`)
+Every commit and Pull Request runs automated supervision:
+- **The Linter**: Scans code for syntax errors, unhandled types, and code smells via `compileDebugKotlin` and `lintDebug`.
+- **The Deprecation Checker**: Audits project dependencies and Gradle configurations against known vulnerable or deprecated packages.
+- **The Formatter**: Validates consistent Kotlin and Compose styling across the codebase.
+- **Automated Regression Tests**: Executes JVM unit tests (`testDebugUnitTest`) before allowing any APK build, guaranteeing existing features remain intact.
+
+#### 2. Prompting Strategy (Human Oversight)
+- **The "Architect First" Rule**: Never instruct the AI to "just write the code." Plan logic and inspect existing interfaces (like `ChatMessageDao` and `LeoRepository`) before modifying code.
+- **The Refactor Session Checkpoint**: Every 3–4 features, pause feature generation and dedicate a prompt specifically to cleaning imports, eliminating redundancies, and verifying unit tests.
+- **The "Rubber Duck" Technique**: Require the AI to explain data flows and edge cases against the local Room database and ViewModel before accepting new components.
+
 - **Store & Distribution Compliance**:
-  - Meets AI disclosure requirements for platforms requiring transparency on AI-assisted code or asset creation (e.g., Google Play and Steam Developer disclosures).
+  - Meets AI disclosure guidelines for platforms requiring transparency on AI-assisted development (e.g., Google Play and Steam AI content disclosures).
 
 ---
 

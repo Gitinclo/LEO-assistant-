@@ -23,15 +23,11 @@ import com.leoai.app.ui.theme.LeoAITheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val bgLight = 0xFFFDFBF7.toInt()
+        val textDark = 0xFF2D332C.toInt()
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(
-                android.graphics.Color.parseColor("#FDFBF7"),
-                android.graphics.Color.parseColor("#2D332C")
-            ),
-            navigationBarStyle = SystemBarStyle.light(
-                android.graphics.Color.parseColor("#FDFBF7"),
-                android.graphics.Color.parseColor("#2D332C")
-            )
+            statusBarStyle = SystemBarStyle.light(bgLight, textDark),
+            navigationBarStyle = SystemBarStyle.light(bgLight, textDark)
         )
         setContent {
             LeoAITheme {

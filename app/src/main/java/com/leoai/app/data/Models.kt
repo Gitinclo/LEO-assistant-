@@ -1,9 +1,10 @@
 package com.leoai.app.data
 
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 
 object LeoMediaAssets {
@@ -49,7 +50,17 @@ data class SessionDateGroup(
     val data: List<ChatSession>
 )
 
-fun nowIsoString(): String = Instant.now().toString()
+private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+    timeZone = TimeZone.getTimeZone("UTC")
+}
+
+private val dayDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+    timeZone = TimeZone.getTimeZone("UTC")
+}
+
+fun nowIsoString(): String = synchronized(isoDateFormat) {
+    isoDateFormat.format(Date())
+}
 
 fun greetingForCurrentHour(): String {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -63,8 +74,10 @@ fun greetingForCurrentHour(): String {
 }
 
 fun groupSessionsByDate(sessions: List<ChatSession>): List<SessionDateGroup> {
-    val today = LocalDate.now(ZoneOffset.UTC).toString()
-    val yesterday = LocalDate.now(ZoneOffset.UTC).minusDays(1).toString()
+    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+    val today = synchronized(dayDateFormat) { dayDateFormat.format(cal.time) }
+    cal.add(Calendar.DAY_OF_YEAR, -1)
+    val yesterday = synchronized(dayDateFormat) { dayDateFormat.format(cal.time) }
 
     val todayItems = mutableListOf<ChatSession>()
     val yesterdayItems = mutableListOf<ChatSession>()
