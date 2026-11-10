@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leoai.app.R
 import com.leoai.app.data.ChatMessage
+import com.leoai.app.data.MessageValidator
 import com.leoai.app.ui.components.LeoAvatar
 import com.leoai.app.ui.components.TypingDotsIndicator
 import com.leoai.app.ui.theme.LeoColors
@@ -90,10 +91,10 @@ fun ChatScreen(
     }
 
     val sendCurrentInput = {
-        val trimmed = input.trim()
-        if (trimmed.isNotEmpty() && !sending) {
+        val validation = MessageValidator.validate(input)
+        if (validation.isValid && !sending) {
             input = ""
-            onSendMessage(sessionId, trimmed)
+            onSendMessage(sessionId, validation.sanitizedContent)
         }
     }
 
@@ -254,7 +255,7 @@ fun ChatScreen(
                 }
                 BasicTextField(
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = { input = MessageValidator.clampLiveInput(it) },
                     enabled = !sending,
                     textStyle = TextStyle(
                         fontSize = 16.sp,
@@ -268,7 +269,7 @@ fun ChatScreen(
                 )
             }
 
-            val sendEnabled = input.isNotBlank() && !sending
+            val sendEnabled = MessageValidator.isValidMessage(input) && !sending
             Box(
                 modifier = Modifier
                     .size(48.dp)

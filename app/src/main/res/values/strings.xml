@@ -18,10 +18,14 @@
     <string name="settings_brand_tag">A quieter kind of AI</string>
     <string name="settings_section_about">ABOUT</string>
     <string name="settings_about_body">LEO is a calm, thoughtful AI companion built to help you think out loud. Powered by Claude Sonnet 4.5.</string>
-    <string name="settings_section_data">DATA</string>
+    <string name="settings_section_data">DATA &amp; ENCRYPTION</string>
+    <string name="settings_encryption_status">AES-256-GCM Local Room Encryption Active</string>
+    <string name="settings_section_compliance">LEGAL &amp; COMPLIANCE</string>
+    <string name="settings_open_compliance_docs">Privacy, Terms, Security &amp; Guardrails</string>
+    <string name="settings_open_compliance_subtitle">View 8 governance, GDPR/CCPA &amp; AES-256-GCM policies</string>
     <string name="settings_clear_conversations">Clear all conversations</string>
     <string name="settings_cleared">Cleared.</string>
-    <string name="settings_footer">v1.0 · Built with care</string>
+    <string name="settings_footer">v1.1 · AES-256-GCM Protected · Built with care</string>
     <string name="cd_open_history">Open conversation history</string>
     <string name="cd_open_settings">Open settings</string>
     <string name="cd_send_message">Send message</string>

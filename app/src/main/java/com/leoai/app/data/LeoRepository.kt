@@ -11,10 +11,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /**
- * Repository pattern abstracting Room database operations from UI/ViewModel.
+ * Repository pattern abstracting Room database operations and AES-256-GCM encryption from UI/ViewModel.
  * Adheres strictly to the room-database-integration skill guidelines:
  * - Returns Flow<T> from queries for reactive Compose integration
  * - Marks insert/update/delete as suspend functions
+ * - Sanitizes inputs via [InputBoundsValidator] prior to persistence
  * - Never blocks the main thread
  */
 class LeoRepository(
@@ -25,7 +26,8 @@ class LeoRepository(
 ) {
 
     /**
-     * Reactive stream of all chat sessions, automatically emitting whenever the Room table updates.
+     * Reactive stream of all chat sessions, automatically decrypting previews and emitting whenever
+     * the Room table updates.
      */
     val allSessions: Flow<List<ChatSession>> = chatDao.getAllSessions().map { entities ->
         entities.map { it.toDomain() }
@@ -39,25 +41,28 @@ class LeoRepository(
     }
 
     /**
-     * Reactive stream of messages for a given session using ChatMessageDao.
+     * Reactive stream of decrypted messages for a given session using [ChatMessageDao].
      */
     fun getMessagesForSession(sessionId: String): Flow<List<ChatMessage>> {
-        return messageDao.getChatHistoryForSession(sessionId).map { entities ->
+        val safeSessionId = InputBoundsValidator.sanitizeId(sessionId)
+        return messageDao.getChatHistoryForSession(safeSessionId).map { entities ->
             entities.map { it.toDomain() }
         }
     }
 
     suspend fun createSession(title: String? = null): ChatSession = withContext(Dispatchers.IO) {
-        val session = ChatSession(
-            title = title?.takeIf { it.isNotBlank() } ?: "New conversation"
+        val safeTitle = InputBoundsValidator.sanitizeSessionTitle(
+            title?.takeIf { it.isNotBlank() } ?: InputBoundsValidator.DEFAULT_SESSION_TITLE
         )
+        val session = ChatSession(title = safeTitle)
         chatDao.insertOrUpdateSession(ChatSessionEntity.fromDomain(session))
         session
     }
 
     suspend fun deleteSession(sessionId: String) = withContext(Dispatchers.IO) {
-        messageDao.deleteMessageHistoryBySession(sessionId)
-        chatDao.deleteSessionById(sessionId)
+        val safeSessionId = InputBoundsValidator.sanitizeId(sessionId)
+        messageDao.deleteMessageHistoryBySession(safeSessionId)
+        chatDao.deleteSessionById(safeSessionId)
     }
 
     suspend fun clearAllConversations() = withContext(Dispatchers.IO) {
@@ -66,49 +71,60 @@ class LeoRepository(
     }
 
     suspend fun getMessagesSnapshot(sessionId: String): List<ChatMessage> = withContext(Dispatchers.IO) {
-        messageDao.getChatHistoryForSessionSnapshot(sessionId).map { it.toDomain() }
+        val safeSessionId = InputBoundsValidator.sanitizeId(sessionId)
+        messageDao.getChatHistoryForSessionSnapshot(safeSessionId).map { it.toDomain() }
     }
 
     suspend fun sendMessage(sessionId: String, rawContent: String): SendMessageResponse =
         withContext(Dispatchers.IO) {
-            val content = rawContent.trim()
-            require(content.isNotEmpty()) { "Message content is empty" }
+            val safeSessionId = InputBoundsValidator.sanitizeId(sessionId)
+            val validation = MessageValidator.validate(
+                rawInput = rawContent,
+                maxLength = MessageValidator.MAX_MESSAGE_LENGTH,
+                truncateIfExceeded = true
+            )
+            require(validation.isValid) {
+                validation.errorMessage ?: "Message content is invalid"
+            }
+            val content = validation.sanitizedContent
 
-            val existingSession = chatDao.getSessionById(sessionId)?.toDomain()
-                ?: ChatSession(id = sessionId, title = "New conversation")
+            val existingSession = chatDao.getSessionById(safeSessionId)?.toDomain()
+                ?: ChatSession(id = safeSessionId, title = InputBoundsValidator.DEFAULT_SESSION_TITLE)
 
-            val priorMessages = messageDao.getChatHistoryForSessionSnapshot(sessionId).map { it.toDomain() }
+            val priorMessages = messageDao.getChatHistoryForSessionSnapshot(safeSessionId).map { it.toDomain() }
 
-            val userMsg = ChatMessage(
-                sessionId = sessionId,
-                role = "user",
-                content = content
+            val userMsg = MessageValidator.sanitizeChatMessage(
+                ChatMessage(
+                    sessionId = safeSessionId,
+                    role = InputBoundsValidator.ROLE_USER,
+                    content = content
+                )
             )
             messageDao.insertMessage(ChatMessageEntity.fromDomain(userMsg))
 
-            val assistantText = companionEngine.generateReply(
-                sessionId = sessionId,
+            val rawAssistantReply = companionEngine.generateReply(
+                sessionId = safeSessionId,
                 userContent = content,
                 priorHistory = priorMessages
             )
+            val assistantText = MessageValidator.sanitize(rawAssistantReply)
 
-            val assistantMsg = ChatMessage(
-                sessionId = sessionId,
-                role = "assistant",
-                content = assistantText
+            val assistantMsg = MessageValidator.sanitizeChatMessage(
+                ChatMessage(
+                    sessionId = safeSessionId,
+                    role = InputBoundsValidator.ROLE_ASSISTANT,
+                    content = assistantText
+                )
             )
             messageDao.insertMessage(ChatMessageEntity.fromDomain(assistantMsg))
 
-            val currentTitle = existingSession.title.ifBlank { "New conversation" }
-            val updatedTitle = if (currentTitle == "New conversation") {
-                if (content.length > 48) content.take(48) + "…" else content
+            val currentTitle = InputBoundsValidator.sanitizeSessionTitle(existingSession.title)
+            val updatedTitle = if (currentTitle == InputBoundsValidator.DEFAULT_SESSION_TITLE) {
+                InputBoundsValidator.deriveTitleFromPrompt(content)
             } else {
                 currentTitle
             }
-            val updatedPreview = assistantText
-                .replace("\n", " ")
-                .replace(Regex("\\s+"), " ")
-                .take(120)
+            val updatedPreview = InputBoundsValidator.sanitizeSessionPreview(assistantText)
 
             val updatedSession = existingSession.copy(
                 title = updatedTitle,

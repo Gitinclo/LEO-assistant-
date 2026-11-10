@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-11-09
+
+### Added
+- **AES-256-GCM Encrypted Room Persistence (`ChatMessageCrypto.kt`)**:
+  - Implemented authenticated encryption (`AES/GCM/NoPadding`, 256-bit `AndroidKeyStore` key, 12-byte random IV per encryption, 128-bit authentication tag, and `sessionId` AAD context binding) for `ChatMessageEntity` and `ChatSessionEntity`.
+- **Expanded Room Entity & DAO (`ChatMessageEntity.kt` & `ChatMessageDao.kt`)**:
+  - Defined composite indices on `(session_id, created_at)` and `(session_id)`, plus batch insert, single-message lookup/deletion, session count, and reactive `Flow` history queries.
+- **Input Bounds Validation Guardrails (`InputBoundsValidator.kt`)**:
+  - Added strict character caps and role domain sanitization across `LeoRepository` and `LeoViewModel`, with clean `CancellationException` propagation.
+- **In-App Legal, Security & Compliance Hub (`ComplianceDocsDialog.kt`)**:
+  - Added an interactive 8-tab compliance and governance viewer inside `SettingsScreen` alongside an active AES-256-GCM encryption status badge.
+
+---
+
 ## [1.0.1] - 2026-10-24
 
 ### Added

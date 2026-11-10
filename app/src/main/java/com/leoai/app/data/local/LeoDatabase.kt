@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.leoai.app.data.ChatMessageDao
 import com.leoai.app.data.local.dao.ChatDao
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
@@ -13,13 +14,13 @@ import com.leoai.app.data.local.entity.ChatSessionEntity
         ChatSessionEntity::class,
         ChatMessageEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class LeoDatabase : RoomDatabase() {
 
     abstract fun chatDao(): ChatDao
-    abstract fun chatMessageDao(): com.leoai.app.data.ChatMessageDao
+    abstract fun chatMessageDao(): ChatMessageDao
 
     companion object {
         private const val DATABASE_NAME = "leo_ai_room.db"
@@ -34,7 +35,7 @@ abstract class LeoDatabase : RoomDatabase() {
                     LeoDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
             }

@@ -91,8 +91,9 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startChatFromWelcome(prompt: String) {
-        val text = prompt.trim()
-        if (text.isEmpty() || _welcomeBusy.value) return
+        val validation = com.leoai.app.data.MessageValidator.validate(prompt)
+        if (!validation.isValid || _welcomeBusy.value) return
+        val text = validation.sanitizedContent
         viewModelScope.launch {
             _welcomeBusy.value = true
             try {
@@ -140,8 +141,9 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendMessage(sessionId: String, rawText: String) {
-        val content = rawText.trim()
-        if (content.isEmpty() || _chatSending.value) return
+        val validation = com.leoai.app.data.MessageValidator.validate(rawText)
+        if (!validation.isValid || _chatSending.value) return
+        val content = validation.sanitizedContent
 
         viewModelScope.launch {
             _chatSending.value = true
@@ -149,7 +151,7 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
             val optimisticUserMsg = ChatMessage(
                 id = "local-${System.currentTimeMillis()}",
                 sessionId = sessionId,
-                role = "user",
+                role = com.leoai.app.data.InputBoundsValidator.ROLE_USER,
                 content = content,
                 createdAt = nowIsoString()
             )
@@ -157,11 +159,13 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 repository.sendMessage(sessionId, content)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (_: Exception) {
                 val fallbackErrorMsg = ChatMessage(
                     id = "err-${System.currentTimeMillis()}",
                     sessionId = sessionId,
-                    role = "assistant",
+                    role = com.leoai.app.data.InputBoundsValidator.ROLE_ASSISTANT,
                     content = "I couldn't reach my thoughts just now. Please try that again in a moment.",
                     createdAt = nowIsoString()
                 )

@@ -1,19 +1,32 @@
 package com.leoai.app
 
 import com.leoai.app.data.ChatMessage
+import com.leoai.app.data.ChatMessageDao
 import com.leoai.app.data.ChatSession
+import com.leoai.app.data.InputBoundsValidator
 import com.leoai.app.data.LeoCompanionEngine
+import com.leoai.app.data.MessageValidator
 import com.leoai.app.data.greetingForCurrentHour
 import com.leoai.app.data.groupSessionsByDate
+import com.leoai.app.data.local.ChatMessageCrypto
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
+import com.leoai.app.ui.components.ComplianceDocTab
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneOffset
+import javax.crypto.AEADBadTagException
 
 class LeoAppUnitTest {
 
@@ -61,7 +74,7 @@ class LeoAppUnitTest {
     }
 
     @Test
-    fun testChatSessionEntityDomainMapping() {
+    fun testChatSessionEntityDomainMappingAndPreviewEncryption() {
         val session = ChatSession(
             id = "test-session-123",
             title = "Morning Reflection",
@@ -75,14 +88,18 @@ class LeoAppUnitTest {
         assertEquals(session.title, entity.title)
         assertEquals(session.createdAt, entity.createdAt)
         assertEquals(session.updatedAt, entity.updatedAt)
-        assertEquals(session.preview, entity.preview)
+        assertTrue(
+            "Session preview should be encrypted at rest with v1: AES-256-GCM prefix",
+            ChatMessageCrypto.isEncryptedPayload(entity.preview)
+        )
+        assertNotEquals(session.preview, entity.preview)
 
         val restored = entity.toDomain()
         assertEquals(session, restored)
     }
 
     @Test
-    fun testChatMessageEntityDomainMapping() {
+    fun testChatMessageEntityEncryptsAtRestAndDecryptsToDomain() {
         val message = ChatMessage(
             id = "msg-999",
             sessionId = "session-1",
@@ -91,15 +108,188 @@ class LeoAppUnitTest {
             createdAt = "2026-10-24T10:01:00Z"
         )
 
-        val entity = ChatMessageEntity.fromDomain(message)
-        assertEquals(message.id, entity.id)
-        assertEquals(message.sessionId, entity.sessionId)
-        assertEquals(message.role, entity.role)
-        assertEquals(message.content, entity.content)
-        assertEquals(message.createdAt, entity.createdAt)
+        val entity1 = ChatMessageEntity.fromDomain(message)
+        val entity2 = ChatMessageEntity.fromDomain(message)
 
-        val restored = entity.toDomain()
+        assertEquals(message.id, entity1.id)
+        assertEquals(message.sessionId, entity1.sessionId)
+        assertEquals(message.role, entity1.role)
+        assertEquals(message.createdAt, entity1.createdAt)
+
+        // Verify AES-256-GCM encryption at rest and unique 12-byte IV per encryption
+        assertTrue(ChatMessageCrypto.isEncryptedPayload(entity1.content))
+        assertNotEquals(message.content, entity1.content)
+        assertNotEquals(
+            "Two encryptions of identical plaintext must differ due to fresh 12-byte random IVs",
+            entity1.content,
+            entity2.content
+        )
+
+        val restored = entity1.toDomain()
         assertEquals(message, restored)
+    }
+
+    @Test
+    fun testAes256GcmAadContextBindingPreventsCrossSessionTampering() {
+        val plaintext = "Sensitive personal reflection"
+        val encryptedForSessionA = ChatMessageCrypto.encrypt(
+            plaintext = plaintext,
+            associatedData = "session-A"
+        )
+
+        // Decrypting with matching AAD succeeds
+        assertEquals(
+            plaintext,
+            ChatMessageCrypto.decrypt(encryptedForSessionA, associatedData = "session-A")
+        )
+
+        // Decrypting with mismatched sessionId AAD must throw AEADBadTagException
+        var threwBadTag = false
+        try {
+            ChatMessageCrypto.decrypt(encryptedForSessionA, associatedData = "session-B")
+        } catch (_: AEADBadTagException) {
+            threwBadTag = true
+        }
+        assertTrue(
+            "Decrypting with wrong sessionId AAD must fail GCM tag verification",
+            threwBadTag
+        )
+
+        // Legacy plaintext without v1: prefix is returned as-is for backward compatibility
+        assertEquals(
+            "Legacy unencrypted note",
+            ChatMessageCrypto.decrypt("Legacy unencrypted note", associatedData = "session-A")
+        )
+    }
+
+    @Test
+    fun testInputBoundsValidatorEnforcesExactLimits() {
+        assertEquals(
+            InputBoundsValidator.MAX_MESSAGE_CONTENT_LEN,
+            InputBoundsValidator.sanitizeMessageContent("M".repeat(5_000)).length
+        )
+        assertEquals(
+            InputBoundsValidator.MAX_SESSION_TITLE_LEN,
+            InputBoundsValidator.sanitizeSessionTitle("T".repeat(150)).length
+        )
+        assertEquals(
+            InputBoundsValidator.MAX_SESSION_PREVIEW_LEN,
+            InputBoundsValidator.sanitizeSessionPreview("P".repeat(250)).length
+        )
+        assertEquals(
+            InputBoundsValidator.DEFAULT_SESSION_TITLE,
+            InputBoundsValidator.sanitizeSessionTitle("   \n  ")
+        )
+        assertEquals("user", InputBoundsValidator.sanitizeRole("USER"))
+        assertEquals("assistant", InputBoundsValidator.sanitizeRole("Assistant"))
+        assertEquals("user", InputBoundsValidator.sanitizeRole("unknown_role"))
+    }
+
+    @Test
+    fun testMessageValidatorSanitizesControlCharsNewlinesAndEnforcesCharacterLimits() {
+        // 1. Control character stripping and CRLF / excessive newline normalization
+        val dirtyInput = "  Hello\u0000\u0007 Leo\r\nLine 2\r\n\r\n\r\n\r\nLine 3\u001F  "
+        val sanitized = MessageValidator.sanitize(dirtyInput)
+        assertEquals("Hello Leo\nLine 2\n\nLine 3", sanitized)
+
+        // 2. Empty or whitespace/control-char-only input is rejected
+        val emptyResult = MessageValidator.validate("   \u0000\n\t  ")
+        assertFalse(emptyResult.isValid)
+        assertEquals("", emptyResult.sanitizedContent)
+        assertEquals(MessageValidator.ValidationError.EMPTY_OR_BLANK, emptyResult.errorReason)
+
+        // 3. Over-limit message with truncateIfExceeded = true is truncated to 4,000 chars
+        val oversized = "A".repeat(4_500)
+        val truncatedResult = MessageValidator.validate(oversized, truncateIfExceeded = true)
+        assertTrue(truncatedResult.isValid)
+        assertTrue(truncatedResult.wasTruncated)
+        assertEquals(MessageValidator.MAX_MESSAGE_LENGTH, truncatedResult.sanitizedLength)
+        assertEquals(4_500, truncatedResult.originalLength)
+
+        // 4. Over-limit message with truncateIfExceeded = false is rejected with EXCEEDS_MAX_LENGTH
+        val strictResult = MessageValidator.validate(oversized, truncateIfExceeded = false)
+        assertFalse(strictResult.isValid)
+        assertFalse(strictResult.wasTruncated)
+        assertEquals(MessageValidator.ValidationError.EXCEEDS_MAX_LENGTH, strictResult.errorReason)
+
+        // 5. Live input clamping preserves mid-word spaces while stripping control chars and capping length
+        val liveClamped = MessageValidator.clampLiveInput("Typing with trailing space \u0000")
+        assertEquals("Typing with trailing space ", liveClamped)
+        assertEquals(
+            MessageValidator.MAX_MESSAGE_LENGTH,
+            MessageValidator.clampLiveInput("X".repeat(4_200)).length
+        )
+
+        // 6. Remaining characters & near-limit threshold checks
+        assertEquals(400, MessageValidator.remainingCharacters("Y".repeat(3_600)))
+        assertTrue(MessageValidator.isNearCharacterLimit("Y".repeat(3_600)))
+        assertFalse(MessageValidator.isNearCharacterLimit("Y".repeat(100)))
+    }
+
+    @Test
+    fun testChatMessageDaoOperationsOrderAndFilterCorrectly() = runBlocking {
+        val dao = InMemoryChatMessageDao()
+
+        val msg1 = ChatMessageEntity.fromDomain(
+            ChatMessage(
+                id = "m1",
+                sessionId = "s1",
+                role = "user",
+                content = "First question",
+                createdAt = "2026-10-24T10:00:00Z"
+            )
+        )
+        val msg2 = ChatMessageEntity.fromDomain(
+            ChatMessage(
+                id = "m2",
+                sessionId = "s1",
+                role = "assistant",
+                content = "First calm answer",
+                createdAt = "2026-10-24T10:00:05Z"
+            )
+        )
+        val msg3 = ChatMessageEntity.fromDomain(
+            ChatMessage(
+                id = "m3",
+                sessionId = "s2",
+                role = "user",
+                content = "Second session prompt",
+                createdAt = "2026-10-24T09:00:00Z"
+            )
+        )
+
+        dao.insertMessage(msg1)
+        dao.insert(msg2)
+        dao.insertMessages(listOf(msg3))
+
+        assertEquals(2, dao.getMessageCountForSession("s1"))
+        assertEquals(1, dao.getMessageCountForSession("s2"))
+        assertNotNull(dao.getMessageById("m1"))
+
+        val s1History = dao.getChatHistoryForSession("s1").first().map { it.toDomain() }
+        assertEquals(listOf("First question", "First calm answer"), s1History.map { it.content })
+
+        val allOrdered = dao.getChatHistoryOrderedByTimestamp().first()
+        assertEquals(listOf("m3", "m1", "m2"), allOrdered.map { it.id })
+
+        dao.deleteMessageHistoryBySession("s1")
+        assertEquals(0, dao.getMessageCountForSession("s1"))
+        assertEquals(1, dao.getAllChatHistorySnapshot().size)
+
+        dao.deleteMessageHistory()
+        assertNull(dao.getMessageById("m3"))
+        assertTrue(dao.getAllChatHistory().first().isEmpty())
+    }
+
+    @Test
+    fun testComplianceDocTabsCoverAllEightGovernanceFiles() {
+        assertEquals(8, ComplianceDocTab.entries.size)
+        ComplianceDocTab.entries.forEach { tab ->
+            assertFalse(tab.label.isBlank())
+            assertFalse(tab.fileName.isBlank())
+            assertFalse(tab.summaryTitle.isBlank())
+            assertFalse(tab.content.isBlank())
+        }
     }
 
     @Test
@@ -116,5 +306,55 @@ class LeoAppUnitTest {
             "Reply should contain calm reply guidance",
             reply.contains("tempo of the conversation") || reply.contains("calm")
         )
+    }
+
+    private class InMemoryChatMessageDao : ChatMessageDao {
+        private val store = MutableStateFlow<Map<String, ChatMessageEntity>>(emptyMap())
+
+        override suspend fun insertMessage(message: ChatMessageEntity) {
+            store.value = store.value + (message.id to message)
+        }
+
+        override suspend fun insert(message: ChatMessageEntity) {
+            insertMessage(message)
+        }
+
+        override suspend fun insertMessages(messages: List<ChatMessageEntity>) {
+            store.value = store.value + messages.associateBy { it.id }
+        }
+
+        override suspend fun getMessageById(id: String): ChatMessageEntity? = store.value[id]
+
+        override suspend fun deleteMessageById(id: String) {
+            store.value = store.value - id
+        }
+
+        override suspend fun deleteMessageHistory() {
+            store.value = emptyMap()
+        }
+
+        override suspend fun deleteMessageHistoryBySession(sessionId: String) {
+            store.value = store.value.filterValues { it.sessionId != sessionId }
+        }
+
+        override fun getAllChatHistory(): Flow<List<ChatMessageEntity>> =
+            store.map { map -> map.values.sortedBy { it.createdAt } }
+
+        override fun getChatHistoryOrderedByTimestamp(): Flow<List<ChatMessageEntity>> =
+            getAllChatHistory()
+
+        override suspend fun getAllChatHistorySnapshot(): List<ChatMessageEntity> =
+            store.value.values.sortedBy { it.createdAt }
+
+        override fun getChatHistoryForSession(sessionId: String): Flow<List<ChatMessageEntity>> =
+            store.map { map ->
+                map.values.filter { it.sessionId == sessionId }.sortedBy { it.createdAt }
+            }
+
+        override suspend fun getChatHistoryForSessionSnapshot(sessionId: String): List<ChatMessageEntity> =
+            store.value.values.filter { it.sessionId == sessionId }.sortedBy { it.createdAt }
+
+        override suspend fun getMessageCountForSession(sessionId: String): Int =
+            store.value.values.count { it.sessionId == sessionId }
     }
 }

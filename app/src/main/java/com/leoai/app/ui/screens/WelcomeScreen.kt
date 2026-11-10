@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leoai.app.R
 import com.leoai.app.data.LeoMediaAssets
+import com.leoai.app.data.MessageValidator
 import com.leoai.app.data.greetingForCurrentHour
 import com.leoai.app.ui.components.BotanicalBackground
 import com.leoai.app.ui.components.LeoAvatar
@@ -75,9 +76,9 @@ fun WelcomeScreen(
     val greeting = remember { greetingForCurrentHour() }
 
     val submitInput = {
-        val trimmed = input.trim()
-        if (trimmed.isNotEmpty() && !busy) {
-            val toSend = trimmed
+        val validation = MessageValidator.validate(input)
+        if (validation.isValid && !busy) {
+            val toSend = validation.sanitizedContent
             input = ""
             onStartChat(toSend)
         }
@@ -246,7 +247,7 @@ fun WelcomeScreen(
                     }
                     BasicTextField(
                         value = input,
-                        onValueChange = { input = it },
+                        onValueChange = { input = MessageValidator.clampLiveInput(it) },
                         enabled = !busy,
                         textStyle = TextStyle(
                             fontSize = 16.sp,
@@ -262,7 +263,7 @@ fun WelcomeScreen(
                     )
                 }
 
-                val sendEnabled = input.isNotBlank() && !busy
+                val sendEnabled = MessageValidator.isValidMessage(input) && !busy
                 Box(
                     modifier = Modifier
                         .size(48.dp)
