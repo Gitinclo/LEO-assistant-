@@ -6,11 +6,19 @@ import com.leoai.app.data.ChatSession
 import com.leoai.app.data.InputBoundsValidator
 import com.leoai.app.data.LeoCompanionEngine
 import com.leoai.app.data.MessageValidator
+import com.leoai.app.data.TrainingDatasetExporter
+import com.leoai.app.data.TrainingProfile
+import com.leoai.app.data.TrainingQaPair
 import com.leoai.app.data.greetingForCurrentHour
 import com.leoai.app.data.groupSessionsByDate
+import com.leoai.app.data.local.Aes256GcmCrypto
+import com.leoai.app.data.local.Aes256GcmRoomConverters
 import com.leoai.app.data.local.ChatMessageCrypto
+import com.leoai.app.data.local.EncryptedMessageContent
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
+import com.leoai.app.data.local.entity.TrainingProfileEntity
+import com.leoai.app.data.local.entity.TrainingQaPairEntity
 import com.leoai.app.ui.components.ComplianceDocTab
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -163,6 +171,40 @@ class LeoAppUnitTest {
     }
 
     @Test
+    fun testAes256GcmCryptoUtilityPayloadInspectionKeyRotationAndRoomConverters() {
+        val crypto = Aes256GcmCrypto("test_alias_aes256_gcm")
+        val plaintext = "Room message encrypted with Android Keystore AES-256-GCM"
+        val aad = "session-xyz-001"
+
+        val cipherPayload = crypto.encrypt(plaintext, associatedData = aad)
+        assertTrue(crypto.isEncryptedPayload(cipherPayload))
+
+        val metadata = crypto.inspectPayload(cipherPayload)
+        assertNotNull(metadata)
+        assertEquals(Aes256GcmCrypto.PAYLOAD_PREFIX, metadata?.versionPrefix)
+        assertEquals(12, metadata?.ivLengthBytes)
+        assertEquals(128, metadata?.tagLengthBits)
+        assertTrue((metadata?.ciphertextAndTagLengthBytes ?: 0) >= 16)
+
+        assertEquals(plaintext, crypto.decrypt(cipherPayload, associatedData = aad))
+
+        // Verify Room TypeConverter round-trip
+        val converters = Aes256GcmRoomConverters()
+        val storedColumn = converters.fromEncryptedMessageContent(EncryptedMessageContent(plaintext))
+        assertNotNull(storedColumn)
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(storedColumn!!))
+        val restoredContent = converters.toEncryptedMessageContent(storedColumn)
+        assertEquals(plaintext, restoredContent?.plaintext)
+
+        // Verify key rotation invalidates prior ciphertext and decryptSafely returns fallback notice
+        crypto.rotateKey()
+        assertEquals(
+            Aes256GcmCrypto.INTEGRITY_FAILURE_FALLBACK,
+            crypto.decryptSafely(cipherPayload, associatedData = aad)
+        )
+    }
+
+    @Test
     fun testInputBoundsValidatorEnforcesExactLimits() {
         assertEquals(
             InputBoundsValidator.MAX_MESSAGE_CONTENT_LEN,
@@ -293,19 +335,71 @@ class LeoAppUnitTest {
     }
 
     @Test
-    fun testLeoCompanionEngineGeneratesThoughtfulStarterReply() = runBlocking {
-        val engine = LeoCompanionEngine()
+    fun testLeoCompanionEngineConfiguresGeminiModelAndSanitizesPrompts() = runBlocking {
+        assertEquals("gemini-3.8-flash", LeoCompanionEngine.MODEL_NAME)
+        assertEquals(60_000L, LeoCompanionEngine.INFERENCE_TIMEOUT_MS)
+
+        val engine = LeoCompanionEngine { sanitizedPrompt, history ->
+            "Gemini response to [$sanitizedPrompt] with ${history.size} prior messages"
+        }
+        val prior = listOf(
+            ChatMessage(id = "p1", sessionId = "test-session", role = "user", content = "Prior turn")
+        )
         val reply = engine.generateReply(
             sessionId = "test-session",
-            userContent = "Help me draft a calm reply to a difficult email",
-            priorHistory = emptyList()
+            userContent = "  Help me draft a calm reply\u0000  ",
+            priorHistory = prior
         )
 
-        assertNotNull(reply)
-        assertTrue(
-            "Reply should contain calm reply guidance",
-            reply.contains("tempo of the conversation") || reply.contains("calm")
+        assertEquals(
+            "Gemini response to [Help me draft a calm reply] with 1 prior messages",
+            reply
         )
+    }
+
+    @Test
+    fun testTrainingEntitiesEncryptAtRestAndExportChatMlJsonlAndQloraScripts() {
+        val profile = TrainingProfile(
+            id = "prof-101",
+            name = "Support Playbook",
+            domainDescription = "Customer support & billing guidelines",
+            sourceNotes = "Refunds are processed within 14 days.",
+            systemPrompt = "Always cite the 14-day refund window.",
+            isActive = true
+        )
+        val profileEntity = TrainingProfileEntity.fromDomain(profile)
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(profileEntity.domainDescription))
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(profileEntity.sourceNotes))
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(profileEntity.systemPrompt))
+        assertEquals(profile, profileEntity.toDomain())
+
+        val qaPair = TrainingQaPair(
+            id = "qa-1",
+            profileId = profile.id,
+            question = "How long do refunds take?",
+            answer = "Refunds are processed within 14 days.",
+            qualityScore = 9,
+            judgeRationale = "Accurate to policy."
+        )
+        val qaEntity = TrainingQaPairEntity.fromDomain(qaPair)
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(qaEntity.question))
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(qaEntity.answer))
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(qaEntity.judgeRationale))
+        assertEquals(qaPair, qaEntity.toDomain())
+
+        val jsonl = TrainingDatasetExporter.exportToChatMlJsonl(profile, listOf(qaPair))
+        assertTrue(jsonl.contains("\"role\":\"system\""))
+        assertTrue(jsonl.contains("How long do refunds take?"))
+        assertTrue(jsonl.contains("\"quality_score\":9"))
+
+        val alpaca = TrainingDatasetExporter.exportToAlpacaJson(profile, listOf(qaPair))
+        assertTrue(alpaca.contains("\"instruction\""))
+        assertTrue(alpaca.contains("Refunds are processed within 14 days."))
+
+        val engine = LeoCompanionEngine()
+        val trainedInstruction = engine.buildTrainedSystemInstruction(profile, listOf(qaPair))
+        assertTrue(trainedInstruction.contains("Support Playbook"))
+        assertTrue(trainedInstruction.contains("How long do refunds take?"))
     }
 
     private class InMemoryChatMessageDao : ChatMessageDao {

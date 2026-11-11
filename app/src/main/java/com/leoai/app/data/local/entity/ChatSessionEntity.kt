@@ -7,7 +7,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.leoai.app.data.ChatSession
 import com.leoai.app.data.InputBoundsValidator
-import com.leoai.app.data.local.ChatMessageCrypto
+import com.leoai.app.data.local.Aes256GcmCrypto
 
 /**
  * Room Database Entity representing a conversation session in the `chat_sessions` table.
@@ -41,7 +41,7 @@ data class ChatSessionEntity(
         preview = if (preview.isEmpty()) {
             ""
         } else {
-            ChatMessageCrypto.decryptSafely(preview, associatedData = id)
+            Aes256GcmCrypto.decryptSafely(preview, associatedData = id)
         }
     )
 
@@ -56,8 +56,8 @@ data class ChatSessionEntity(
 
             val storedPreview = when {
                 safePreview.isEmpty() -> ""
-                encryptAtRest && !ChatMessageCrypto.isEncryptedPayload(safePreview) ->
-                    ChatMessageCrypto.encrypt(safePreview, associatedData = safeId)
+                encryptAtRest && !Aes256GcmCrypto.isEncryptedPayload(safePreview) ->
+                    Aes256GcmCrypto.encrypt(safePreview, associatedData = safeId)
                 else -> safePreview
             }
 

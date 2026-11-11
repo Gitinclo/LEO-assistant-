@@ -7,14 +7,14 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.leoai.app.data.ChatMessage
 import com.leoai.app.data.InputBoundsValidator
-import com.leoai.app.data.local.ChatMessageCrypto
+import com.leoai.app.data.local.Aes256GcmCrypto
 
 /**
  * Room Database Entity representing a single chat message in a conversation session.
  *
  * Stored in the `chat_messages` table with composite indexing on `(session_id, created_at)`
  * for fast chronological retrieval. Message `content` is encrypted at rest using
- * AES-256-GCM (`ChatMessageCrypto`) with `sessionId` bound as Associated Authenticated Data (AAD).
+ * AES-256-GCM ([Aes256GcmCrypto]) with `sessionId` bound as Associated Authenticated Data (AAD).
  */
 @Immutable
 @Entity(
@@ -44,7 +44,7 @@ data class ChatMessageEntity(
         id = id,
         sessionId = sessionId,
         role = InputBoundsValidator.sanitizeRole(role),
-        content = ChatMessageCrypto.decryptSafely(content, associatedData = sessionId),
+        content = Aes256GcmCrypto.decryptSafely(content, associatedData = sessionId),
         createdAt = createdAt
     )
 
@@ -62,8 +62,8 @@ data class ChatMessageEntity(
             val safeRole = InputBoundsValidator.sanitizeRole(message.role)
             val safeContent = InputBoundsValidator.sanitizeMessageContent(message.content)
 
-            val storedContent = if (encryptAtRest && !ChatMessageCrypto.isEncryptedPayload(safeContent)) {
-                ChatMessageCrypto.encrypt(safeContent, associatedData = safeSessionId)
+            val storedContent = if (encryptAtRest && !Aes256GcmCrypto.isEncryptedPayload(safeContent)) {
+                Aes256GcmCrypto.encrypt(safeContent, associatedData = safeSessionId)
             } else {
                 safeContent
             }

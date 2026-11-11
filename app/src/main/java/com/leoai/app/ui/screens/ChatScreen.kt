@@ -71,6 +71,8 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     loading: Boolean,
     sending: Boolean,
+    errorMessage: String? = null,
+    onDismissError: () -> Unit = {},
     onLoadSession: (String, String?) -> Unit,
     onSendMessage: (String, String) -> Unit,
     onBack: () -> Unit,
@@ -171,6 +173,39 @@ fun ChatScreen(
         }
         HorizontalDivider(thickness = 1.dp, color = LeoColors.Border)
 
+        if (!errorMessage.isNullOrBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(LeoColors.SurfaceElevated)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .testTag("chat-error-banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = errorMessage,
+                    color = LeoColors.Danger,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp)
+                )
+                Text(
+                    text = "Dismiss",
+                    color = LeoColors.TextSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable(onClick = onDismissError)
+                        .padding(vertical = 4.dp, horizontal = 8.dp)
+                        .testTag("dismiss-error-button")
+                )
+            }
+            HorizontalDivider(thickness = 1.dp, color = LeoColors.Border)
+        }
+
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -217,7 +252,8 @@ fun ChatScreen(
                         ChatMessageRow(message = message)
                     }
 
-                    if (sending) {
+                    val hasStreamingAssistantBubble = messages.lastOrNull()?.id?.startsWith("streaming-") == true
+                    if (sending && !hasStreamingAssistantBubble) {
                         item(key = "typing-indicator-item") {
                             TypingDotsIndicator()
                         }

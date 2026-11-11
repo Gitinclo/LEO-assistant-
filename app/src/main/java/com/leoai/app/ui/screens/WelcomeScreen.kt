@@ -27,7 +27,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,7 +70,9 @@ import com.leoai.app.ui.theme.LeoRadius
 @Composable
 fun WelcomeScreen(
     busy: Boolean,
+    activeProfileName: String? = null,
     onStartChat: (String) -> Unit,
+    onOpenTrainAi: () -> Unit = {},
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -121,6 +125,19 @@ fun WelcomeScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = onOpenTrainAi,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("open-train-ai-button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = stringResource(R.string.cd_open_train_ai),
+                            tint = LeoColors.Primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                     IconButton(
                         onClick = onOpenHistory,
                         modifier = Modifier
@@ -191,8 +208,58 @@ fun WelcomeScreen(
                         lineHeight = 34.sp,
                         fontStyle = FontStyle.Italic,
                         color = LeoColors.TextSecondary,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 40.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                     )
+
+                    Surface(
+                        onClick = onOpenTrainAi,
+                        shape = RoundedCornerShape(LeoRadius.Md),
+                        color = LeoColors.SurfaceElevated,
+                        border = BorderStroke(1.dp, LeoColors.Primary.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 28.dp)
+                            .testTag("welcome-train-ai-card")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = LeoColors.Primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Train My AI · Dataset & QLoRA Studio",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = LeoColors.TextPrimary
+                                )
+                                Text(
+                                    text = if (!activeProfileName.isNullOrBlank()) {
+                                        "Active profile: $activeProfileName · Generate Q&A, Unsloth scripts & AI Judge"
+                                    } else {
+                                        "Generate synthetic Q&A data, Unsloth QLoRA code & AI-as-a-Judge scores"
+                                    },
+                                    fontSize = 12.sp,
+                                    color = LeoColors.TextSecondary
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = LeoColors.TextMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
 
                     Text(
                         text = stringResource(R.string.section_try_starter),

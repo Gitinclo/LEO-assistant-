@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.Lock
@@ -56,6 +57,7 @@ import com.leoai.app.ui.theme.LeoRadius
 fun SettingsScreen(
     clearing: Boolean,
     cleared: Boolean,
+    onOpenTrainAi: () -> Unit = {},
     onClearAll: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -167,6 +169,62 @@ fun SettingsScreen(
                         color = LeoColors.TextPrimary,
                         modifier = Modifier.padding(20.dp)
                     )
+                }
+
+                Text(
+                    text = stringResource(R.string.settings_section_training),
+                    fontSize = 11.sp,
+                    letterSpacing = 2.sp,
+                    color = LeoColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(LeoRadius.Md),
+                    color = LeoColors.Surface,
+                    border = BorderStroke(1.dp, LeoColors.Border),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(LeoRadius.Md))
+                        .clickable { onOpenTrainAi() }
+                        .testTag("settings-open-train-ai-button")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = LeoColors.Primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_open_train_ai),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = LeoColors.TextPrimary
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_open_train_ai_subtitle),
+                                fontSize = 12.sp,
+                                color = LeoColors.TextSecondary
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = LeoColors.TextMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
 
                 Text(

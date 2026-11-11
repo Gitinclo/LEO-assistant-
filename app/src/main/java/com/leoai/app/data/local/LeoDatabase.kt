@@ -4,23 +4,31 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import com.leoai.app.data.ChatMessageDao
 import com.leoai.app.data.local.dao.ChatDao
+import com.leoai.app.data.local.dao.TrainingDao
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
+import com.leoai.app.data.local.entity.TrainingProfileEntity
+import com.leoai.app.data.local.entity.TrainingQaPairEntity
 
 @Database(
     entities = [
         ChatSessionEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        TrainingProfileEntity::class,
+        TrainingQaPairEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
+@TypeConverters(Aes256GcmRoomConverters::class)
 abstract class LeoDatabase : RoomDatabase() {
 
     abstract fun chatDao(): ChatDao
     abstract fun chatMessageDao(): ChatMessageDao
+    abstract fun trainingDao(): TrainingDao
 
     companion object {
         private const val DATABASE_NAME = "leo_ai_room.db"

@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan for LEO AI Room chat message entity and DAO, AES-256-GCM at-rest message encryption with AAD binding, input bounds validation guardrails, and an interactive in-app Compliance & Legal Docs viewer dialog.",
-  "updatedAt":  "2026-11-10T01:00:28.739573342Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
