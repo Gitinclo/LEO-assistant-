@@ -402,6 +402,118 @@ class LeoAppUnitTest {
         assertTrue(trainedInstruction.contains("How long do refunds take?"))
     }
 
+    @Test
+    fun testDocumentIngestionEncryptionChunkingAndOllamaPromptOrchestration() = runBlocking {
+        val rawDocText = buildString {
+            append("# Architecture & Security Manual\n")
+            repeat(18) { idx ->
+                append("Section ${idx + 1}: All training documents and synthetic Q&A pairs are encrypted at rest in Room using Android Keystore AES-256-GCM with a 12-byte random IV and 128-bit authentication tag.\n\n")
+            }
+        }
+
+        // 1. Verify sliding-window chunking
+        val chunks = com.leoai.app.data.DocumentIngestionChunker.chunkDocument(
+            docId = "doc-001",
+            fileName = "security_manual.pdf",
+            sourcePath = "./data/raw_docs/security_manual.pdf",
+            rawText = rawDocText,
+            chunkSizeChars = 1_400,
+            overlapChars = 180
+        )
+        assertTrue("Document > 1400 chars should split into multiple overlapping chunks", chunks.size >= 2)
+        assertEquals(0, chunks.first().chunkIndex)
+        assertEquals(chunks.size, chunks.first().totalChunks)
+
+        // 2. Verify IngestedDocumentEntity AES-256-GCM encryption at rest & AAD binding
+        val docDomain = com.leoai.app.data.IngestedDocument(
+            id = "doc-001",
+            profileId = "prof-101",
+            fileName = "security_manual.pdf",
+            sourcePath = "./data/raw_docs/security_manual.pdf",
+            rawContent = rawDocText.trim(),
+            chunkCount = chunks.size,
+            charCount = rawDocText.trim().length,
+            status = "INGESTED"
+        )
+        val docEntity = com.leoai.app.data.local.entity.IngestedDocumentEntity.fromDomain(docDomain)
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(docEntity.sourcePath))
+        assertTrue(Aes256GcmCrypto.isEncryptedPayload(docEntity.rawContent))
+        assertNotEquals(docDomain.rawContent, docEntity.rawContent)
+        assertEquals(docDomain, docEntity.toDomain())
+
+        // 3. Verify Ollama Teacher Prompt, JSON Payload, and JSON Parser
+        val teacherPrompt = com.leoai.app.data.OllamaDatasetOrchestrator.buildTeacherPrompt(
+            chunk = chunks.first(),
+            targetTask = "Domain documentation, PDFs, and technical Q&A",
+            pairsPerChunk = 2
+        )
+        assertTrue(teacherPrompt.contains("security_manual.pdf"))
+        assertTrue(teacherPrompt.contains("Domain documentation, PDFs, and technical Q&A"))
+
+        val apiPayload = com.leoai.app.data.OllamaDatasetOrchestrator.buildOllamaGeneratePayloadJson(
+            modelTag = com.leoai.app.data.OllamaTeacherModel.LLAMA_3_3.modelTag,
+            prompt = teacherPrompt
+        )
+        assertTrue(apiPayload.contains("\"model\":\"llama3.3\""))
+        assertTrue(apiPayload.contains("\"format\":\"json\""))
+
+        val sampleOllamaJson = """
+            {
+              "pairs": [
+                {
+                  "question": "How are ingested documents encrypted in Room?",
+                  "answer": "They are encrypted at rest with Android Keystore AES-256-GCM using a 12-byte IV and 128-bit tag.",
+                  "quality_score": 10,
+                  "judge_rationale": "Grounded directly in Section 1."
+                },
+                {
+                  "question": "How are ingested documents encrypted in Room?",
+                  "answer": "Duplicate question that should be filtered by normalized hash deduplication.",
+                  "quality_score": 9,
+                  "judge_rationale": "Duplicate test."
+                },
+                {
+                  "question": "Low score noisy pair?",
+                  "answer": "This pair has quality score 5 and should be pruned by the AI-as-a-Judge threshold.",
+                  "quality_score": 5,
+                  "judge_rationale": "Below threshold."
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsed = com.leoai.app.data.OllamaDatasetOrchestrator.parsePairsFromJsonText("prof-101", sampleOllamaJson)
+        assertEquals(3, parsed.size)
+
+        val (kept, dropped) = com.leoai.app.data.OllamaDatasetOrchestrator.deduplicateAndFilterPairs(
+            existingPairs = emptyList(),
+            newCandidatePairs = parsed,
+            minScore = 8
+        )
+        assertEquals(1, kept.size)
+        assertEquals(2, dropped)
+        assertEquals("How are ingested documents encrypted in Room?", kept.first().question)
+
+        // 4. Verify end-to-end orchestrateFromDocuments with offline fallback
+        val orchestrator = com.leoai.app.data.OllamaDatasetOrchestrator(fallbackTrainingEngine = null)
+        val profile = TrainingProfile(
+            id = "prof-101",
+            name = "Security Coach",
+            domainDescription = "Domain documentation, PDFs, and technical Q&A",
+            sourceNotes = "AES-256-GCM encryption specs",
+            systemPrompt = "Cite security invariants."
+        )
+        val result = orchestrator.orchestrateFromDocuments(
+            profile = profile,
+            documents = listOf(docDomain),
+            existingPairs = emptyList(),
+            teacherModel = com.leoai.app.data.OllamaTeacherModel.LLAMA_3_3,
+            ollamaEndpoint = "http://127.0.0.1:65530/api/generate" // unreachable port to test deterministic fallback
+        )
+        assertEquals(1, result.documentsProcessed)
+        assertEquals(chunks.size, result.chunksProcessed)
+        assertTrue(result.keptPairs.isNotEmpty())
+    }
+
     private class InMemoryChatMessageDao : ChatMessageDao {
         private val store = MutableStateFlow<Map<String, ChatMessageEntity>>(emptyMap())
 

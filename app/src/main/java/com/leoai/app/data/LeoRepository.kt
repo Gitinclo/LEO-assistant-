@@ -6,6 +6,7 @@ import com.leoai.app.data.local.dao.ChatDao
 import com.leoai.app.data.local.dao.TrainingDao
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
+import com.leoai.app.data.local.entity.IngestedDocumentEntity
 import com.leoai.app.data.local.entity.TrainingProfileEntity
 import com.leoai.app.data.local.entity.TrainingQaPairEntity
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ class LeoRepository(
     context: Context,
     private val companionEngine: LeoCompanionEngine = LeoCompanionEngine(),
     private val trainingEngine: LeoTrainingEngine = LeoTrainingEngine(),
+    private val ollamaOrchestrator: OllamaDatasetOrchestrator = OllamaDatasetOrchestrator(trainingEngine),
     private val chatDao: ChatDao = LeoDatabase.getInstance(context).chatDao(),
     private val messageDao: ChatMessageDao = LeoDatabase.getInstance(context).chatMessageDao(),
     private val trainingDao: TrainingDao = LeoDatabase.getInstance(context).trainingDao()
@@ -76,17 +78,32 @@ class LeoRepository(
         }
     }
 
+    /**
+     * Reactive stream of AES-256-GCM decrypted raw ingested documents stored in Room for [profileId].
+     */
+    fun getIngestedDocumentsForProfile(profileId: String): Flow<List<IngestedDocument>> {
+        val safeId = InputBoundsValidator.sanitizeId(profileId)
+        return trainingDao.getDocumentsForProfile(safeId).map { list ->
+            list.map { it.toDomain() }
+        }
+    }
+
     suspend fun ensureStarterTrainingProfile(): TrainingProfile = withContext(Dispatchers.IO) {
         val existing = trainingDao.getAllProfiles().first()
         if (existing.isNotEmpty()) {
-            return@withContext existing.first().toDomain()
+            val activeOrFirst = existing.first().toDomain()
+            val existingDocs = trainingDao.getDocumentsForProfileSnapshot(activeOrFirst.id)
+            if (existingDocs.isEmpty()) {
+                seedStarterDocumentsForProfile(activeOrFirst.id)
+            }
+            return@withContext activeOrFirst
         }
 
         val hardware = HardwarePreset.RTX_16GB
         val defaultSystem = "You are LEO trained as an Executive Communication & Technical Clarity Coach. Give structured, plainspoken answers with concrete examples, zero fluff, and calm authority."
         val starterProfile = TrainingProfile(
             name = "Executive & Technical Coach",
-            domainDescription = "Calm, high-signal technical architecture notes, code review habits, and executive communication guidelines.",
+            domainDescription = "Domain documentation, PDFs, and technical Q&A covering AES-256-GCM storage, Unsloth 4-bit QLoRA fine-tuning, and executive architecture specs.",
             sourceNotes = """
                 1. When explaining complex technical systems, always lead with the 1-sentence core invariant before listing trade-offs.
                 2. In code reviews or architecture docs, prefer explicit state machines and small composable functions over deep inheritance hierarchies.
@@ -114,6 +131,7 @@ class LeoRepository(
         )
 
         trainingDao.upsertProfile(TrainingProfileEntity.fromDomain(starterProfile))
+        seedStarterDocumentsForProfile(starterProfile.id)
 
         val starterPairs = listOf(
             TrainingQaPair(
@@ -140,6 +158,112 @@ class LeoRepository(
         )
         trainingDao.insertQaPairs(starterPairs.map { TrainingQaPairEntity.fromDomain(it) })
         starterProfile
+    }
+
+    private suspend fun seedStarterDocumentsForProfile(profileId: String) {
+        val doc1Text = """
+            # LEO Security & Storage Architecture Specification (v2.4)
+            All user messages, training profiles, raw ingested documents, and synthetic Q&A pairs are encrypted at rest inside the Room SQLite database (`leo_ai_room.db`) using Android Keystore AES-256-GCM.
+            Each encryption operation generates a fresh 12-byte cryptographic initialization vector (IV) and a 128-bit GCM authentication tag, serialized with the `v1:` payload prefix.
+            Associated Authenticated Data (AAD) binds each encrypted record to its owning `sessionId` or `profileId` so ciphertext cannot be transplanted across sessions or profiles without triggering an `AEADBadTagException`.
+        """.trimIndent()
+
+        val doc2Text = """
+            # Unsloth 4-bit QLoRA & Local Ollama Training Playbook
+            To fine-tune a local student model (`Llama-3.2-3B-Instruct` or `Qwen2.5-7B-Instruct`) with 100% offline privacy:
+            1. Ingest raw domain PDFs, Markdown notes, and technical specifications into overlapping 1,400-character chunks (180-character overlap).
+            2. Prompt a local Ollama teacher model (`llama3.3` or `qwen2.5:14b`) via `POST http://127.0.0.1:11434/api/generate` with `format: "json"` to extract grounded Q&A pairs.
+            3. Run an AI-as-a-Judge quality pass to prune hallucinations, duplicates, and pairs scoring below 8/10 before exporting to ChatML `.jsonl` and training with 4-bit NormalFloat (`nf4`) QLoRA adapters.
+        """.trimIndent()
+
+        val starterDocs = listOf(
+            IngestedDocument(
+                profileId = profileId,
+                fileName = "leo_aes256_security_spec.pdf",
+                sourcePath = "./data/raw_docs/leo_aes256_security_spec.pdf",
+                rawContent = doc1Text,
+                chunkCount = DocumentIngestionChunker.chunkDocument("d1", "leo_aes256_security_spec.pdf", rawText = doc1Text).size,
+                charCount = doc1Text.length,
+                status = "INGESTED"
+            ),
+            IngestedDocument(
+                profileId = profileId,
+                fileName = "unsloth_qlora_engineering_guide.md",
+                sourcePath = "./data/raw_docs/unsloth_qlora_engineering_guide.md",
+                rawContent = doc2Text,
+                chunkCount = DocumentIngestionChunker.chunkDocument("d2", "unsloth_qlora_engineering_guide.md", rawText = doc2Text).size,
+                charCount = doc2Text.length,
+                status = "INGESTED"
+            )
+        )
+        trainingDao.upsertDocuments(starterDocs.map { IngestedDocumentEntity.fromDomain(it) })
+    }
+
+    suspend fun ingestRawDocument(
+        profileId: String,
+        fileName: String,
+        sourcePath: String,
+        rawContent: String
+    ): IngestedDocument = withContext(Dispatchers.IO) {
+        val safeProfileId = InputBoundsValidator.sanitizeId(profileId)
+        val cleanName = fileName.trim().ifBlank { "domain_document_${System.currentTimeMillis() % 10000}.md" }.take(140)
+        val cleanPath = sourcePath.trim().ifBlank { "./data/raw_docs/$cleanName" }.take(260)
+        val normalizedText = DocumentIngestionChunker.normalizeRawDocumentText(rawContent)
+        require(normalizedText.isNotBlank()) { "Document text cannot be empty." }
+
+        val docId = java.util.UUID.randomUUID().toString()
+        val chunks = DocumentIngestionChunker.chunkDocument(
+            docId = docId,
+            fileName = cleanName,
+            sourcePath = cleanPath,
+            rawText = normalizedText
+        )
+        val doc = IngestedDocument(
+            id = docId,
+            profileId = safeProfileId,
+            fileName = cleanName,
+            sourcePath = cleanPath,
+            rawContent = normalizedText,
+            chunkCount = chunks.size.coerceAtLeast(1),
+            charCount = normalizedText.length,
+            status = "INGESTED"
+        )
+        trainingDao.upsertDocument(IngestedDocumentEntity.fromDomain(doc))
+        doc
+    }
+
+    suspend fun deleteIngestedDocument(documentId: String) = withContext(Dispatchers.IO) {
+        trainingDao.deleteDocumentById(InputBoundsValidator.sanitizeId(documentId))
+    }
+
+    suspend fun orchestrateOllamaDatasetGeneration(
+        profile: TrainingProfile,
+        teacherModel: OllamaTeacherModel,
+        ollamaEndpoint: String
+    ): OllamaOrchestrationResult = withContext(Dispatchers.IO) {
+        val docs = trainingDao.getDocumentsForProfileSnapshot(profile.id).map { it.toDomain() }
+        require(docs.isNotEmpty()) {
+            "Ingest at least one raw document into Room before running the Ollama prompt flow."
+        }
+        val existingPairs = trainingDao.getQaPairsForProfileSnapshot(profile.id).map { it.toDomain() }
+
+        val result = ollamaOrchestrator.orchestrateFromDocuments(
+            profile = profile,
+            documents = docs,
+            existingPairs = existingPairs,
+            teacherModel = teacherModel,
+            ollamaEndpoint = ollamaEndpoint.trim().ifBlank { OllamaDatasetOrchestrator.DEFAULT_OLLAMA_ENDPOINT },
+            pairsPerChunk = 2,
+            minQualityScore = OllamaDatasetOrchestrator.DEFAULT_MIN_QUALITY_SCORE,
+            onDocumentStatusChange = { docId, status ->
+                trainingDao.updateDocumentStatus(docId, status)
+            }
+        )
+
+        if (result.keptPairs.isNotEmpty()) {
+            trainingDao.insertQaPairs(result.keptPairs.map { TrainingQaPairEntity.fromDomain(it) })
+        }
+        result
     }
 
     suspend fun saveTrainingProfile(profile: TrainingProfile): TrainingProfile = withContext(Dispatchers.IO) {

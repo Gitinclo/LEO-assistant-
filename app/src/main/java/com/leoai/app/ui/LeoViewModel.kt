@@ -7,9 +7,13 @@ import androidx.lifecycle.viewModelScope
 import com.leoai.app.data.ChatMessage
 import com.leoai.app.data.ChatSession
 import com.leoai.app.data.HardwarePreset
+import com.leoai.app.data.IngestedDocument
 import com.leoai.app.data.InputBoundsValidator
 import com.leoai.app.data.LeoRepository
 import com.leoai.app.data.MessageValidator
+import com.leoai.app.data.OllamaDatasetOrchestrator
+import com.leoai.app.data.OllamaOrchestrationResult
+import com.leoai.app.data.OllamaTeacherModel
 import com.leoai.app.data.QloraPipelinePlan
 import com.leoai.app.data.SideBySideEvaluation
 import com.leoai.app.data.TrainingProfile
@@ -82,6 +86,18 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
     private val _trainingQaPairs = MutableStateFlow<List<TrainingQaPair>>(emptyList())
     val trainingQaPairs: StateFlow<List<TrainingQaPair>> = _trainingQaPairs.asStateFlow()
 
+    private val _ingestedDocuments = MutableStateFlow<List<IngestedDocument>>(emptyList())
+    val ingestedDocuments: StateFlow<List<IngestedDocument>> = _ingestedDocuments.asStateFlow()
+
+    private val _selectedOllamaTeacher = MutableStateFlow(OllamaTeacherModel.LLAMA_3_3)
+    val selectedOllamaTeacher: StateFlow<OllamaTeacherModel> = _selectedOllamaTeacher.asStateFlow()
+
+    private val _ollamaEndpoint = MutableStateFlow(OllamaDatasetOrchestrator.DEFAULT_OLLAMA_ENDPOINT)
+    val ollamaEndpoint: StateFlow<String> = _ollamaEndpoint.asStateFlow()
+
+    private val _lastOrchestrationResult = MutableStateFlow<OllamaOrchestrationResult?>(null)
+    val lastOrchestrationResult: StateFlow<OllamaOrchestrationResult?> = _lastOrchestrationResult.asStateFlow()
+
     private val _qloraPlan = MutableStateFlow<QloraPipelinePlan?>(null)
     val qloraPlan: StateFlow<QloraPipelinePlan?> = _qloraPlan.asStateFlow()
 
@@ -144,12 +160,14 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
 
     private var activeSessionMessagesJob: Job? = null
     private var activeProfilePairsJob: Job? = null
+    private var activeProfileDocsJob: Job? = null
 
     init {
         viewModelScope.launch {
             val starter = repository.ensureStarterTrainingProfile()
             _selectedTrainingProfile.value = starter
             observeQaPairsForProfile(starter.id)
+            observeIngestedDocumentsForProfile(starter.id)
         }
     }
 
@@ -158,6 +176,15 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
         activeProfilePairsJob = viewModelScope.launch {
             repository.getQaPairsForProfile(profileId).collect { pairs ->
                 _trainingQaPairs.value = pairs
+            }
+        }
+    }
+
+    private fun observeIngestedDocumentsForProfile(profileId: String) {
+        activeProfileDocsJob?.cancel()
+        activeProfileDocsJob = viewModelScope.launch {
+            repository.getIngestedDocumentsForProfile(profileId).collect { docs ->
+                _ingestedDocuments.value = docs
             }
         }
     }
@@ -327,6 +354,84 @@ class LeoViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteQaPair(pairId: String) {
         viewModelScope.launch {
             repository.deleteQaPair(pairId)
+        }
+    }
+
+    fun selectOllamaTeacherModel(model: OllamaTeacherModel) {
+        _selectedOllamaTeacher.value = model
+    }
+
+    fun updateOllamaEndpoint(endpoint: String) {
+        _ollamaEndpoint.value = endpoint
+    }
+
+    fun ingestRawDocument(
+        fileName: String,
+        sourcePath: String,
+        rawContent: String
+    ) {
+        val current = _selectedTrainingProfile.value ?: return
+        val contentValidation = MessageValidator.validate(rawContent, maxLength = 32_000, truncateIfExceeded = true)
+        if (!contentValidation.isValid) {
+            _trainingError.value = contentValidation.errorMessage ?: "Raw document text cannot be empty."
+            return
+        }
+
+        viewModelScope.launch {
+            _trainingError.value = null
+            try {
+                val doc = repository.ingestRawDocument(
+                    profileId = current.id,
+                    fileName = fileName,
+                    sourcePath = sourcePath,
+                    rawContent = contentValidation.sanitizedContent
+                )
+                _trainingStatusBanner.value =
+                    "Ingested '${doc.fileName}' into Room (${doc.chunkCount} chunks · ${doc.charCount} chars · AES-256-GCM encrypted)."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Document ingestion failed", e)
+                _trainingError.value = e.localizedMessage ?: "Failed to ingest document into Room."
+            }
+        }
+    }
+
+    fun deleteIngestedDocument(documentId: String) {
+        viewModelScope.launch {
+            repository.deleteIngestedDocument(documentId)
+            _trainingStatusBanner.value = "Removed document from Room vault."
+        }
+    }
+
+    fun runOllamaDatasetOrchestration() {
+        val current = _selectedTrainingProfile.value ?: return
+        if (_trainingBusy.value) return
+
+        viewModelScope.launch {
+            _trainingBusy.value = true
+            _trainingError.value = null
+            _trainingStatusBanner.value = null
+            try {
+                val result = repository.orchestrateOllamaDatasetGeneration(
+                    profile = current,
+                    teacherModel = _selectedOllamaTeacher.value,
+                    ollamaEndpoint = _ollamaEndpoint.value
+                )
+                _lastOrchestrationResult.value = result
+                _trainingStatusBanner.value =
+                    "Ollama Prompt Flow (${result.teacherModel}): Processed ${result.documentsProcessed} docs (${result.chunksProcessed} chunks) → Added ${result.keptPairs.size} verified Q&A pairs to Room."
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Ollama dataset orchestration timed out", e)
+                _trainingError.value = "Ollama prompt flow timed out after 60 seconds."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Ollama dataset orchestration failed", e)
+                _trainingError.value = e.localizedMessage ?: "Ollama dataset orchestration failed."
+            } finally {
+                _trainingBusy.value = false
+            }
         }
     }
 

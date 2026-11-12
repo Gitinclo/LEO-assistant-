@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.leoai.app.data.local.entity.IngestedDocumentEntity
 import com.leoai.app.data.local.entity.TrainingProfileEntity
 import com.leoai.app.data.local.entity.TrainingQaPairEntity
 import kotlinx.coroutines.flow.Flow
@@ -55,4 +56,25 @@ interface TrainingDao {
 
     @Query("DELETE FROM training_qa_pairs WHERE profile_id = :profileId")
     suspend fun deleteQaPairsForProfile(profileId: String)
+
+    @Query("SELECT * FROM ingested_documents WHERE profile_id = :profileId ORDER BY created_at DESC")
+    fun getDocumentsForProfile(profileId: String): Flow<List<IngestedDocumentEntity>>
+
+    @Query("SELECT * FROM ingested_documents WHERE profile_id = :profileId ORDER BY created_at ASC")
+    suspend fun getDocumentsForProfileSnapshot(profileId: String): List<IngestedDocumentEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDocument(document: IngestedDocumentEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDocuments(documents: List<IngestedDocumentEntity>)
+
+    @Query("UPDATE ingested_documents SET status = :status WHERE id = :documentId")
+    suspend fun updateDocumentStatus(documentId: String, status: String)
+
+    @Query("DELETE FROM ingested_documents WHERE id = :documentId")
+    suspend fun deleteDocumentById(documentId: String)
+
+    @Query("DELETE FROM ingested_documents WHERE profile_id = :profileId")
+    suspend fun deleteDocumentsForProfile(profileId: String)
 }

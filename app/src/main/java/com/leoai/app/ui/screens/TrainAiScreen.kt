@@ -72,8 +72,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leoai.app.R
+import com.leoai.app.data.DocumentIngestionChunker
+import com.leoai.app.data.DocumentTextChunk
 import com.leoai.app.data.HardwarePreset
+import com.leoai.app.data.IngestedDocument
 import com.leoai.app.data.MessageValidator
+import com.leoai.app.data.OllamaDatasetOrchestrator
+import com.leoai.app.data.OllamaOrchestrationResult
+import com.leoai.app.data.OllamaTeacherModel
 import com.leoai.app.data.QloraPipelinePlan
 import com.leoai.app.data.SideBySideEvaluation
 import com.leoai.app.data.TrainingDatasetExporter
@@ -86,6 +92,10 @@ import com.leoai.app.ui.theme.LeoRadius
 fun TrainAiScreen(
     profile: TrainingProfile?,
     qaPairs: List<TrainingQaPair>,
+    ingestedDocuments: List<IngestedDocument>,
+    selectedOllamaTeacher: OllamaTeacherModel,
+    ollamaEndpoint: String,
+    lastOrchestrationResult: OllamaOrchestrationResult?,
     qloraPlan: QloraPipelinePlan?,
     sideBySideEval: SideBySideEvaluation?,
     busy: Boolean,
@@ -93,6 +103,11 @@ fun TrainAiScreen(
     errorMessage: String?,
     onUpdateProfileFields: (String, String, String, String, String) -> Unit,
     onToggleActiveInChat: (Boolean) -> Unit,
+    onIngestDocument: (String, String, String) -> Unit,
+    onDeleteDocument: (String) -> Unit,
+    onSelectOllamaTeacher: (OllamaTeacherModel) -> Unit,
+    onUpdateOllamaEndpoint: (String) -> Unit,
+    onRunOllamaOrchestrator: () -> Unit,
     onGenerateSyntheticDataset: (String, String, String) -> Unit,
     onRunAiJudgeAudit: () -> Unit,
     onPruneLowQuality: (Int) -> Unit,
@@ -121,6 +136,10 @@ fun TrainAiScreen(
     var hardwareId by rememberSaveable(profile?.id) {
         mutableStateOf(profile?.hardwareTarget ?: HardwarePreset.RTX_16GB.id)
     }
+
+    var docFileNameInput by rememberSaveable { mutableStateOf("api_architecture_manual.pdf") }
+    var docSourcePathInput by rememberSaveable { mutableStateOf("./data/raw_docs/api_architecture_manual.pdf") }
+    var docRawContentInput by rememberSaveable { mutableStateOf("") }
 
     var manualQuestion by rememberSaveable { mutableStateOf("") }
     var manualAnswer by rememberSaveable { mutableStateOf("") }
@@ -174,7 +193,7 @@ fun TrainAiScreen(
                     color = LeoColors.TextPrimary
                 )
                 Text(
-                    text = "TEACHER AI · QLoRA · JUDGE",
+                    text = "OLLAMA TEACHER · ROOM VAULT · QLoRA",
                     fontSize = 10.sp,
                     letterSpacing = 1.8.sp,
                     color = LeoColors.TextMuted
@@ -228,7 +247,7 @@ fun TrainAiScreen(
                             color = LeoColors.TextPrimary
                         )
                         Text(
-                            text = "Uses your Q&A dataset (${qaPairs.size} pairs) + custom instructions in live chat",
+                            text = "Uses ${ingestedDocuments.size} Room docs · ${qaPairs.size} Q&A pairs + custom instructions in live chat",
                             fontSize = 11.sp,
                             color = LeoColors.TextSecondary
                         )
@@ -256,7 +275,7 @@ fun TrainAiScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             StageTabButton(
-                label = "1. Dataset & Judge",
+                label = "1. Ingest & Generate",
                 selected = selectedStage == 0,
                 tag = "tab-dataset-judge",
                 modifier = Modifier.weight(1f),
@@ -337,6 +356,13 @@ fun TrainAiScreen(
                         domainInput = domainInput,
                         notesInput = notesInput,
                         systemPromptInput = systemPromptInput,
+                        docFileNameInput = docFileNameInput,
+                        docSourcePathInput = docSourcePathInput,
+                        docRawContentInput = docRawContentInput,
+                        ingestedDocuments = ingestedDocuments,
+                        selectedOllamaTeacher = selectedOllamaTeacher,
+                        ollamaEndpoint = ollamaEndpoint,
+                        lastOrchestrationResult = lastOrchestrationResult,
                         manualQuestion = manualQuestion,
                         manualAnswer = manualAnswer,
                         qaPairs = qaPairs,
@@ -345,6 +371,23 @@ fun TrainAiScreen(
                         onDomainChange = { domainInput = MessageValidator.clampLiveInput(it, 1_000) },
                         onNotesChange = { notesInput = MessageValidator.clampLiveInput(it) },
                         onSystemPromptChange = { systemPromptInput = MessageValidator.clampLiveInput(it, 2_000) },
+                        onDocFileNameChange = { docFileNameInput = MessageValidator.clampLiveInput(it, 140) },
+                        onDocSourcePathChange = { docSourcePathInput = MessageValidator.clampLiveInput(it, 260) },
+                        onDocRawContentChange = { docRawContentInput = MessageValidator.clampLiveInput(it, 32_000) },
+                        onIngestDocument = {
+                            if (docRawContentInput.isNotBlank()) {
+                                onIngestDocument(docFileNameInput, docSourcePathInput, docRawContentInput)
+                                docRawContentInput = ""
+                            }
+                        },
+                        onDeleteDocument = onDeleteDocument,
+                        onSelectOllamaTeacher = onSelectOllamaTeacher,
+                        onOllamaEndpointChange = { onUpdateOllamaEndpoint(MessageValidator.clampLiveInput(it, 240)) },
+                        onRunOllamaOrchestrator = onRunOllamaOrchestrator,
+                        onCopyOllamaCurl = { curlCmd ->
+                            copyToClipboard(context, "ollama_generate_curl.sh", curlCmd)
+                            localCopiedNotice = "Copied local Ollama /api/generate cURL payload to clipboard."
+                        },
                         onManualQuestionChange = { manualQuestion = MessageValidator.clampLiveInput(it, 1_500) },
                         onManualAnswerChange = { manualAnswer = MessageValidator.clampLiveInput(it) },
                         onSaveProfile = {
@@ -468,6 +511,13 @@ private fun DatasetAndJudgeStage(
     domainInput: String,
     notesInput: String,
     systemPromptInput: String,
+    docFileNameInput: String,
+    docSourcePathInput: String,
+    docRawContentInput: String,
+    ingestedDocuments: List<IngestedDocument>,
+    selectedOllamaTeacher: OllamaTeacherModel,
+    ollamaEndpoint: String,
+    lastOrchestrationResult: OllamaOrchestrationResult?,
     manualQuestion: String,
     manualAnswer: String,
     qaPairs: List<TrainingQaPair>,
@@ -476,6 +526,15 @@ private fun DatasetAndJudgeStage(
     onDomainChange: (String) -> Unit,
     onNotesChange: (String) -> Unit,
     onSystemPromptChange: (String) -> Unit,
+    onDocFileNameChange: (String) -> Unit,
+    onDocSourcePathChange: (String) -> Unit,
+    onDocRawContentChange: (String) -> Unit,
+    onIngestDocument: () -> Unit,
+    onDeleteDocument: (String) -> Unit,
+    onSelectOllamaTeacher: (OllamaTeacherModel) -> Unit,
+    onOllamaEndpointChange: (String) -> Unit,
+    onRunOllamaOrchestrator: () -> Unit,
+    onCopyOllamaCurl: (String) -> Unit,
     onManualQuestionChange: (String) -> Unit,
     onManualAnswerChange: (String) -> Unit,
     onSaveProfile: () -> Unit,
@@ -487,6 +546,390 @@ private fun DatasetAndJudgeStage(
     onCopyChatMlJsonl: () -> Unit,
     onCopyAlpacaJson: () -> Unit
 ) {
+    var showPromptFlowInspector by rememberSaveable { mutableStateOf(true) }
+
+    // SECTION A: DATASET INGESTION VAULT (ROOM AES-256-GCM)
+    Surface(
+        shape = RoundedCornerShape(LeoRadius.Md),
+        color = LeoColors.Surface,
+        border = BorderStroke(1.dp, LeoColors.Border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dataset-ingestion-vault-card")
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "PHASE 2A · RAW DOCUMENT INGESTION VAULT (ROOM)",
+                    fontSize = 11.sp,
+                    letterSpacing = 1.6.sp,
+                    color = LeoColors.TextMuted
+                )
+                val totalChunks = ingestedDocuments.sumOf { it.chunkCount }
+                Text(
+                    text = "${ingestedDocuments.size} docs · $totalChunks chunks · AES-256-GCM",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = LeoColors.Primary
+                )
+            }
+
+            Text(
+                text = "Store raw text extracted from local PDFs, Markdown notes, or technical manuals directly in Room (`ingested_documents`). Each document is encrypted at rest with Android Keystore AES-256-GCM and split into overlapping 1,400-char chunks.",
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                color = LeoColors.TextSecondary
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    LabeledInputField(
+                        label = "DOCUMENT FILE NAME",
+                        value = docFileNameInput,
+                        onValueChange = onDocFileNameChange,
+                        placeholder = "e.g., architecture_spec.pdf",
+                        singleLine = true,
+                        testTag = "ingest-doc-filename-input"
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    LabeledInputField(
+                        label = "LOCAL SOURCE DATA PATH",
+                        value = docSourcePathInput,
+                        onValueChange = onDocSourcePathChange,
+                        placeholder = "./data/raw_docs/...",
+                        singleLine = true,
+                        testTag = "ingest-doc-path-input"
+                    )
+                }
+            }
+
+            LabeledInputField(
+                label = "RAW DOCUMENT TEXT TO STORE IN ROOM & CHUNK FOR OLLAMA",
+                value = docRawContentInput,
+                onValueChange = onDocRawContentChange,
+                placeholder = "Paste raw text from your PDF, DOCX, or technical Markdown note here to encrypt in Room and chunk for synthetic Q&A generation…",
+                minHeight = 88.dp,
+                testTag = "ingest-doc-content-input"
+            )
+
+            Surface(
+                onClick = onIngestDocument,
+                enabled = !busy && docRawContentInput.isNotBlank(),
+                shape = RoundedCornerShape(LeoRadius.Sm),
+                color = LeoColors.SurfaceElevated,
+                border = BorderStroke(1.dp, LeoColors.Primary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ingest-document-button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = LeoColors.Primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Ingest Raw Document into Room Vault",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LeoColors.Primary,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+
+            if (ingestedDocuments.isNotEmpty()) {
+                HorizontalDivider(thickness = 1.dp, color = LeoColors.Border)
+                Text(
+                    text = "INGESTED ROOM DOCUMENTS (${ingestedDocuments.size})",
+                    fontSize = 10.sp,
+                    letterSpacing = 1.5.sp,
+                    color = LeoColors.TextMuted
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ingestedDocuments.forEachIndexed { index, doc ->
+                        IngestedDocumentRowCard(
+                            doc = doc,
+                            index = index,
+                            onDelete = { onDeleteDocument(doc.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // SECTION B: LOCAL OLLAMA PROMPT FLOW ORCHESTRATOR
+    val firstDoc = ingestedDocuments.firstOrNull()
+    val previewChunk = remember(firstDoc?.id, firstDoc?.rawContent, notesInput) {
+        if (firstDoc != null) {
+            DocumentIngestionChunker.chunkDocument(
+                docId = firstDoc.id,
+                fileName = firstDoc.fileName,
+                sourcePath = firstDoc.sourcePath,
+                rawText = firstDoc.rawContent
+            ).firstOrNull()
+        } else {
+            null
+        } ?: DocumentTextChunk(
+            documentId = "preview-doc",
+            fileName = "leo_aes256_security_spec.pdf",
+            sourcePath = "./data/raw_docs/leo_aes256_security_spec.pdf",
+            chunkIndex = 0,
+            totalChunks = 1,
+            content = notesInput.ifBlank { "Domain documentation and technical Q&A specification." }
+        )
+    }
+
+    val liveTeacherPrompt = remember(previewChunk, domainInput) {
+        OllamaDatasetOrchestrator.buildTeacherPrompt(
+            chunk = previewChunk,
+            targetTask = domainInput,
+            pairsPerChunk = 2
+        )
+    }
+    val liveCurlCommand = remember(ollamaEndpoint, selectedOllamaTeacher, previewChunk, domainInput) {
+        OllamaDatasetOrchestrator.buildOllamaCurlPreview(
+            endpointUrl = ollamaEndpoint,
+            modelTag = selectedOllamaTeacher.modelTag,
+            chunk = previewChunk,
+            targetTask = domainInput
+        )
+    }
+
+    Surface(
+        shape = RoundedCornerShape(LeoRadius.Md),
+        color = LeoColors.Surface,
+        border = BorderStroke(1.dp, LeoColors.Border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ollama-orchestrator-card")
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "PHASE 2B · LOCAL OLLAMA PROMPT FLOW ORCHESTRATOR",
+                    fontSize = 11.sp,
+                    letterSpacing = 1.6.sp,
+                    color = LeoColors.TextMuted
+                )
+                Text(
+                    text = "100% OFFLINE PRIVACY",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LeoColors.Primary
+                )
+            }
+
+            Text(
+                text = "Orchestrates the 3-step local Ollama prompt pipeline across your Room documents: (1) Sliding-window chunk extraction → (2) Teacher JSON Q&A generation (`POST /api/generate`) → (3) AI-as-a-Judge quality grading & hash deduplication.",
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                color = LeoColors.TextSecondary
+            )
+
+            Text(
+                text = "SELECT LOCAL OLLAMA TEACHER MODEL",
+                fontSize = 10.sp,
+                letterSpacing = 1.5.sp,
+                color = LeoColors.TextMuted
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OllamaTeacherModel.entries.forEach { teacher ->
+                    val isSelected = teacher == selectedOllamaTeacher
+                    Surface(
+                        onClick = { onSelectOllamaTeacher(teacher) },
+                        shape = RoundedCornerShape(LeoRadius.Sm),
+                        color = if (isSelected) LeoColors.SurfaceElevated else LeoColors.Bg,
+                        border = BorderStroke(
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            color = if (isSelected) LeoColors.Primary else LeoColors.Border
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ollama-teacher-${teacher.modelTag}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${teacher.label} (${teacher.modelTag})",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = LeoColors.TextPrimary
+                                )
+                                Text(
+                                    text = teacher.summary,
+                                    fontSize = 11.sp,
+                                    color = LeoColors.TextSecondary
+                                )
+                            }
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(LeoColors.Primary)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            LabeledInputField(
+                label = "LOCAL OLLAMA HTTP ENDPOINT (DEFAULT EMULATOR BRIDGE: 10.0.2.2:11434)",
+                value = ollamaEndpoint,
+                onValueChange = onOllamaEndpointChange,
+                placeholder = "http://10.0.2.2:11434/api/generate",
+                singleLine = true,
+                testTag = "ollama-endpoint-input"
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (showPromptFlowInspector) {
+                        "Hide Live Ollama Teacher Prompt & Payload"
+                    } else {
+                        "Inspect Live Ollama Teacher Prompt & Payload"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = LeoColors.Primary,
+                    modifier = Modifier
+                        .clickable { showPromptFlowInspector = !showPromptFlowInspector }
+                        .padding(vertical = 4.dp)
+                        .testTag("toggle-ollama-prompt-preview-button")
+                )
+
+                ActionChipButton(
+                    icon = Icons.Outlined.ContentCopy,
+                    label = "Copy Ollama cURL",
+                    enabled = true,
+                    testTag = "copy-ollama-curl-button",
+                    onClick = { onCopyOllamaCurl(liveCurlCommand) }
+                )
+            }
+
+            if (showPromptFlowInspector) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(LeoRadius.Sm))
+                        .background(LeoColors.SurfaceElevated)
+                        .border(1.dp, LeoColors.Border, RoundedCornerShape(LeoRadius.Sm))
+                        .padding(12.dp)
+                        .testTag("ollama-prompt-preview-box")
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = liveTeacherPrompt,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = LeoColors.TextPrimary
+                        )
+                    }
+                }
+            }
+
+            if (lastOrchestrationResult != null) {
+                Surface(
+                    shape = RoundedCornerShape(LeoRadius.Sm),
+                    color = LeoColors.SurfaceElevated,
+                    border = BorderStroke(1.dp, LeoColors.Primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ollama-orchestration-summary-card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "LAST PROMPT FLOW RUN · ${lastOrchestrationResult.teacherModel.uppercase()}",
+                            fontSize = 10.sp,
+                            letterSpacing = 1.4.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = LeoColors.Primary
+                        )
+                        Text(
+                            text = "Processed ${lastOrchestrationResult.documentsProcessed} Room docs (${lastOrchestrationResult.chunksProcessed} chunks) → Kept ${lastOrchestrationResult.keptPairs.size} Q&A pairs (${lastOrchestrationResult.filteredDuplicatesOrLowScore} duplicates/low-score pruned).",
+                            fontSize = 12.sp,
+                            color = LeoColors.TextPrimary
+                        )
+                    }
+                }
+            }
+
+            Surface(
+                onClick = onRunOllamaOrchestrator,
+                enabled = !busy && ingestedDocuments.isNotEmpty(),
+                shape = RoundedCornerShape(LeoRadius.Sm),
+                color = LeoColors.Primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("run-ollama-orchestrator-button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = LeoColors.PrimaryFg,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = if (busy) {
+                            "Running Ollama Prompt Flow on ${ingestedDocuments.size} Docs…"
+                        } else {
+                            "Run Ollama Prompt Flow & Generate Q&A Pairs (${ingestedDocuments.size} Docs)"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LeoColors.PrimaryFg,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    // SECTION C: PROFILE & SYSTEM INSTRUCTION SETTINGS
     Surface(
         shape = RoundedCornerShape(LeoRadius.Md),
         color = LeoColors.Surface,
@@ -498,13 +941,13 @@ private fun DatasetAndJudgeStage(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "STEP 1 · TEACHER AI SYNTHETIC DATA ENGINE",
+                text = "STEP 1 · TRAINING PROFILE & DOMAIN CONFIGURATION",
                 fontSize = 11.sp,
                 letterSpacing = 1.8.sp,
                 color = LeoColors.TextMuted
             )
             Text(
-                text = "Feed your raw notes, documentation, or style rules to the Teacher AI (Gemini 3.8 Flash). It automatically extracts high-signal Q&A pairs, grades each pair with AI-as-a-Judge, and encrypts your dataset in Room.",
+                text = "Configure your target domain, supplementary source notes, and system prompt. All profile fields and generated Q&A pairs are encrypted at rest in Room.",
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 color = LeoColors.TextSecondary
@@ -523,7 +966,7 @@ private fun DatasetAndJudgeStage(
                 label = "WHAT SHOULD THE MODEL LEARN? (DOMAIN / GOAL)",
                 value = domainInput,
                 onValueChange = onDomainChange,
-                placeholder = "e.g., Coding style, customer support playbook, or PDF manual facts",
+                placeholder = "e.g., Domain documentation, PDFs, and technical Q&A",
                 minHeight = 64.dp,
                 testTag = "train-domain-input"
             )
@@ -571,7 +1014,7 @@ private fun DatasetAndJudgeStage(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = if (busy) "Generating Q&A…" else "Generate Q&A Dataset",
+                            text = if (busy) "Generating Q&A…" else "Generate Q&A from Notes",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = LeoColors.PrimaryFg,
@@ -749,6 +1192,88 @@ private fun DatasetAndJudgeStage(
                 pair = pair,
                 index = index,
                 onDelete = { onDeletePair(pair.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun IngestedDocumentRowCard(
+    doc: IngestedDocument,
+    index: Int,
+    onDelete: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(LeoRadius.Sm),
+        color = LeoColors.Bg,
+        border = BorderStroke(1.dp, LeoColors.Border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ingested-doc-card-$index")
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = doc.fileName,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LeoColors.TextPrimary
+                    )
+                    Text(
+                        text = "${doc.sourcePath} · ${doc.chunkCount} chunk(s) · ${doc.charCount} chars",
+                        fontSize = 11.sp,
+                        color = LeoColors.TextMuted
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(LeoColors.Primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = doc.status,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = LeoColors.Primary
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("delete-ingested-doc-$index")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = "Delete ingested document",
+                            tint = LeoColors.TextMuted,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = doc.rawContent.take(190) + if (doc.rawContent.length > 190) "…" else "",
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = LeoColors.TextSecondary
             )
         }
     }

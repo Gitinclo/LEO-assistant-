@@ -49,6 +49,10 @@ fun LeoApp(viewModel: LeoViewModel = viewModel()) {
     val activeProfile by viewModel.activeTrainingProfile.collectAsStateWithLifecycle()
     val selectedTrainingProfile by viewModel.selectedTrainingProfile.collectAsStateWithLifecycle()
     val trainingQaPairs by viewModel.trainingQaPairs.collectAsStateWithLifecycle()
+    val ingestedDocuments by viewModel.ingestedDocuments.collectAsStateWithLifecycle()
+    val selectedOllamaTeacher by viewModel.selectedOllamaTeacher.collectAsStateWithLifecycle()
+    val ollamaEndpoint by viewModel.ollamaEndpoint.collectAsStateWithLifecycle()
+    val lastOrchestrationResult by viewModel.lastOrchestrationResult.collectAsStateWithLifecycle()
     val qloraPlan by viewModel.qloraPlan.collectAsStateWithLifecycle()
     val sideBySideEval by viewModel.sideBySideEval.collectAsStateWithLifecycle()
     val trainingBusy by viewModel.trainingBusy.collectAsStateWithLifecycle()
@@ -118,6 +122,10 @@ fun LeoApp(viewModel: LeoViewModel = viewModel()) {
                 TrainAiScreen(
                     profile = selectedTrainingProfile,
                     qaPairs = trainingQaPairs,
+                    ingestedDocuments = ingestedDocuments,
+                    selectedOllamaTeacher = selectedOllamaTeacher,
+                    ollamaEndpoint = ollamaEndpoint,
+                    lastOrchestrationResult = lastOrchestrationResult,
                     qloraPlan = qloraPlan,
                     sideBySideEval = sideBySideEval,
                     busy = trainingBusy,
@@ -125,6 +133,11 @@ fun LeoApp(viewModel: LeoViewModel = viewModel()) {
                     errorMessage = trainingError,
                     onUpdateProfileFields = viewModel::updateTrainingProfileFields,
                     onToggleActiveInChat = viewModel::toggleProfileActiveInChat,
+                    onIngestDocument = viewModel::ingestRawDocument,
+                    onDeleteDocument = viewModel::deleteIngestedDocument,
+                    onSelectOllamaTeacher = viewModel::selectOllamaTeacherModel,
+                    onUpdateOllamaEndpoint = viewModel::updateOllamaEndpoint,
+                    onRunOllamaOrchestrator = viewModel::runOllamaDatasetOrchestration,
                     onGenerateSyntheticDataset = viewModel::generateSyntheticDatasetWithTeacherAi,
                     onRunAiJudgeAudit = viewModel::runAiJudgeDatasetAudit,
                     onPruneLowQuality = viewModel::pruneLowQualityQaPairs,

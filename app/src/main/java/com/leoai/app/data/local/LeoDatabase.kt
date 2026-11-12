@@ -10,6 +10,7 @@ import com.leoai.app.data.local.dao.ChatDao
 import com.leoai.app.data.local.dao.TrainingDao
 import com.leoai.app.data.local.entity.ChatMessageEntity
 import com.leoai.app.data.local.entity.ChatSessionEntity
+import com.leoai.app.data.local.entity.IngestedDocumentEntity
 import com.leoai.app.data.local.entity.TrainingProfileEntity
 import com.leoai.app.data.local.entity.TrainingQaPairEntity
 
@@ -18,9 +19,10 @@ import com.leoai.app.data.local.entity.TrainingQaPairEntity
         ChatSessionEntity::class,
         ChatMessageEntity::class,
         TrainingProfileEntity::class,
-        TrainingQaPairEntity::class
+        TrainingQaPairEntity::class,
+        IngestedDocumentEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Aes256GcmRoomConverters::class)

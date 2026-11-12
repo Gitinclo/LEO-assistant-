@@ -86,6 +86,122 @@ data class TrainingQaPair(
     val createdAt: String = nowIsoString()
 )
 
+enum class OllamaTeacherModel(
+    val modelTag: String,
+    val label: String,
+    val summary: String
+) {
+    LLAMA_3_3(
+        modelTag = "llama3.3",
+        label = "Llama 3.3 · Local Teacher",
+        summary = "100% private offline synthesis for technical docs, PDFs, and multi-hop Q&A"
+    ),
+    QWEN_2_5_14B(
+        modelTag = "qwen2.5:14b",
+        label = "Qwen 2.5 14B · Structured JSON",
+        summary = "High-precision JSON schema extraction and AI-as-a-Judge factual verification"
+    ),
+    QWEN_CODER_7B(
+        modelTag = "qwen2.5-coder:7b",
+        label = "Qwen 2.5 Coder 7B · Code & Specs",
+        summary = "Fast local teacher specialized in API specs, architecture docs, and code conventions"
+    );
+
+    companion object {
+        fun fromTag(tag: String): OllamaTeacherModel =
+            entries.firstOrNull { it.modelTag.equals(tag, ignoreCase = true) } ?: LLAMA_3_3
+    }
+}
+
+@Immutable
+data class IngestedDocument(
+    val id: String = UUID.randomUUID().toString(),
+    val profileId: String,
+    val fileName: String,
+    val sourcePath: String,
+    val rawContent: String,
+    val chunkCount: Int,
+    val charCount: Int,
+    val status: String = "INGESTED",
+    val createdAt: String = nowIsoString()
+)
+
+@Immutable
+data class DocumentTextChunk(
+    val documentId: String,
+    val fileName: String,
+    val sourcePath: String,
+    val chunkIndex: Int,
+    val totalChunks: Int,
+    val content: String
+)
+
+object DocumentIngestionChunker {
+    const val DEFAULT_CHUNK_SIZE_CHARS = 1_400
+    const val DEFAULT_OVERLAP_CHARS = 180
+
+    fun normalizeRawDocumentText(rawText: String): String {
+        return rawText
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace(Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F]"), "")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+    }
+
+    fun chunkDocument(
+        docId: String,
+        fileName: String,
+        sourcePath: String = "./data/raw_docs/$fileName",
+        rawText: String,
+        chunkSizeChars: Int = DEFAULT_CHUNK_SIZE_CHARS,
+        overlapChars: Int = DEFAULT_OVERLAP_CHARS
+    ): List<DocumentTextChunk> {
+        val cleaned = normalizeRawDocumentText(rawText)
+        if (cleaned.isEmpty()) return emptyList()
+
+        val safeChunkSize = chunkSizeChars.coerceAtLeast(250)
+        val safeOverlap = overlapChars.coerceIn(0, safeChunkSize / 2)
+
+        if (cleaned.length <= safeChunkSize) {
+            return listOf(
+                DocumentTextChunk(
+                    documentId = docId,
+                    fileName = fileName,
+                    sourcePath = sourcePath,
+                    chunkIndex = 0,
+                    totalChunks = 1,
+                    content = cleaned
+                )
+            )
+        }
+
+        val rawSliceList = mutableListOf<String>()
+        var start = 0
+        while (start < cleaned.length) {
+            val end = (start + safeChunkSize).coerceAtMost(cleaned.length)
+            val slice = cleaned.substring(start, end).trim()
+            if (slice.length >= 24) {
+                rawSliceList.add(slice)
+            }
+            if (end >= cleaned.length) break
+            start = (end - safeOverlap).coerceAtLeast(start + 1)
+        }
+
+        val total = rawSliceList.size.coerceAtLeast(1)
+        return rawSliceList.mapIndexed { idx, text ->
+            DocumentTextChunk(
+                documentId = docId,
+                fileName = fileName,
+                sourcePath = sourcePath,
+                chunkIndex = idx,
+                totalChunks = total,
+                content = text
+            )
+        }
+    }
+}
+
 @Immutable
 data class QloraPipelinePlan(
     val recommendedModel: String,
