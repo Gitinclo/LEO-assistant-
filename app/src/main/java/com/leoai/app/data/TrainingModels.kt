@@ -276,4 +276,41 @@ object TrainingDatasetExporter {
             ""${'"'}
         """.trimIndent()
     }
+
+    /**
+     * Builds an end-to-end 4-phase autonomous Python ML pipeline script configured for
+     * 100% local Ollama teacher generation (`llama3.3` / `qwen2.5`), document chunking,
+     * AI-as-a-Judge filtering, schema mapping, 4-bit Unsloth QLoRA training, and side-by-side evaluation.
+     */
+    fun buildAutonomous4PhasePipelineScript(
+        sourceDataPath: String = "./data/raw_docs",
+        targetTask: String = "Domain documentation, PDFs, and technical Q&A",
+        localTeacherModel: String = "llama3.3",
+        studentBaseModel: String = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+    ): String {
+        return """
+            #!/usr/bin/env python3
+            # Autonomous 4-Phase Local LLM Fine-Tuning Pipeline
+            # • Source Data Path: $sourceDataPath
+            # • Privacy Mode: 100% Local Ollama Teacher & Judge ($localTeacherModel)
+            # • Target Task: $targetTask
+            # • Student Base Model: $studentBaseModel
+            #
+            # Run:
+            #   python3 ml_pipeline/run_pipeline.py \
+            #     --source-dir "$sourceDataPath" \
+            #     --target-task "$targetTask" \
+            #     --teacher-model "$localTeacherModel"
+            
+            from ml_pipeline.run_pipeline import run_autonomous_pipeline
+            
+            if __name__ == "__main__":
+                report = run_autonomous_pipeline(
+                    source_dir="$sourceDataPath",
+                    target_task="$targetTask",
+                    teacher_model="$localTeacherModel",
+                )
+                print("Completed all 4 phases:", report["phase2_dataset"]["dataset_jsonl"])
+        """.trimIndent()
+    }
 }

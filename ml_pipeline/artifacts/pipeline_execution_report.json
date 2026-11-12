@@ -1,0 +1,79 @@
+{
+  "phase1_hardware": {
+    "accelerator": "cpu",
+    "device_name": "x86_64",
+    "memory_gb": 12.0,
+    "recommended_student_model": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+    "lora_rank": 16,
+    "lora_alpha": 16,
+    "batch_size": 2,
+    "grad_accumulation": 4,
+    "learning_rate": "2e-4",
+    "max_seq_length": 2048,
+    "install_commands": [
+      "/usr/bin/python3 -m venv .venv",
+      ".venv/bin/pip install --upgrade pip",
+      ".venv/bin/pip install \"unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git\"",
+      ".venv/bin/pip install --no-deps xformers \"trl<0.9.0\" peft accelerate bitsandbytes",
+      ".venv/bin/pip install datasets pypdf python-docx openpyxl requests"
+    ]
+  },
+  "phase2_dataset": {
+    "source_dir": "./data/raw_docs",
+    "privacy_mode": "local_ollama_offline",
+    "teacher_model": "llama3.3",
+    "ingested_chunks": 1,
+    "generated_pairs": 4,
+    "judge_approved_pairs": 4,
+    "dataset_jsonl": "ml_pipeline/artifacts/cleaned_training_dataset.jsonl"
+  },
+  "phase3_qlora": {
+    "schema_mapping": {
+      "schema_type": "chatml",
+      "row_count": 4,
+      "user_key": "messages[role=user].content",
+      "assistant_key": "messages[role=assistant].content",
+      "system_key": "messages[role=system].content",
+      "avg_char_length": 960
+    },
+    "trainer_script": "ml_pipeline/artifacts/train_unsloth_qlora.py"
+  },
+  "phase4_evaluation": [
+    {
+      "prompt": "Based on leo_architecture_and_security_manual.md, what are the key technical requirements regarding 'LEO Technical Architecture & AES-256-GCM Security Specification'?",
+      "reference_answer": "# LEO Technical Architecture & AES-256-GCM Security Specification",
+      "base_response": "Generic base model response without specific domain documentation context.",
+      "tuned_response": "# LEO Technical Architecture & AES-256-GCM Security Specification",
+      "base_scores": {
+        "instruction_adherence": 6,
+        "factual_accuracy": 5,
+        "formatting_consistency": 6
+      },
+      "tuned_scores": {
+        "instruction_adherence": 9,
+        "factual_accuracy": 9,
+        "formatting_consistency": 9
+      },
+      "winner": "tuned",
+      "judge_rationale": "Fine-tuned response preserved exact domain facts and structured formatting."
+    },
+    {
+      "prompt": "Based on leo_architecture_and_security_manual.md, what are the key technical requirements regarding '1. Local Room Database Encryption at Rest'?",
+      "reference_answer": "## 1. Local Room Database Encryption at Rest\nAll chat messages (`chat_messages`), session previews (`chat_sessions`), and training datasets (`training_profiles`, `training_qa_pairs`) are encrypted at rest using `AES/GCM/NoPadding` with a 256-bit master key managed by `AndroidKeyStore`.\nEvery encryption operation generates a fresh 12-byte (96-bit) cryptographically random IV and a 128-bit authentication tag, binding the `sessionId` or `profileId` as Associated Authenticated Data (AAD) to prevent cross-record tampering.",
+      "base_response": "Generic base model response without specific domain documentation context.",
+      "tuned_response": "## 1. Local Room Database Encryption at Rest\nAll chat messages (`chat_messages`), session previews (`chat_sessions`), and training datasets (`training_profiles`, `training_qa_pairs`) are encrypted at rest using `AES/GCM/NoPadding` with a 256-bit master key managed by `AndroidKeyStore`.\nEvery encryption operation generates a fresh 12-byte (96-bit) cryptographically random IV and a 128-bit authentication tag, binding the `sessionId` or `profileId` as Associated Authenticated Data (AAD) to prevent cross-record tampering.",
+      "base_scores": {
+        "instruction_adherence": 6,
+        "factual_accuracy": 5,
+        "formatting_consistency": 6
+      },
+      "tuned_scores": {
+        "instruction_adherence": 9,
+        "factual_accuracy": 9,
+        "formatting_consistency": 9
+      },
+      "winner": "tuned",
+      "judge_rationale": "Fine-tuned response preserved exact domain facts and structured formatting."
+    }
+  ]
+}

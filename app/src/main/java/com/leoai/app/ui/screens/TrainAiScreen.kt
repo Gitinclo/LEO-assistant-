@@ -1096,6 +1096,55 @@ private fun QloraHardwareStage(
                     }
                 }
             }
+
+            val autonomousCliScript = TrainingDatasetExporter.buildAutonomous4PhasePipelineScript(
+                sourceDataPath = "./data/raw_docs",
+                targetTask = profile?.domainDescription?.ifBlank {
+                    "Domain documentation, PDFs, and technical Q&A"
+                } ?: "Domain documentation, PDFs, and technical Q&A",
+                localTeacherModel = "llama3.3",
+                studentBaseModel = recommendedModel
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "4-Phase Local Ollama Orchestrator (ml_pipeline/)",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = LeoColors.TextPrimary
+                )
+                ActionChipButton(
+                    icon = Icons.Outlined.ContentCopy,
+                    label = "Copy 4-Phase Pipeline",
+                    enabled = true,
+                    testTag = "copy-4phase-pipeline-button",
+                    onClick = { onCopyScript(autonomousCliScript) }
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(LeoRadius.Sm))
+                    .background(LeoColors.SurfaceElevated)
+                    .border(1.dp, LeoColors.Border, RoundedCornerShape(LeoRadius.Sm))
+                    .padding(14.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = autonomousCliScript,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = LeoColors.TextPrimary
+                    )
+                }
+            }
         }
     }
 }
